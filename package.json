@@ -1,0 +1,15 @@
+{
+  "name": "fantasy-auction-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure deterministic Phase 1 fantasy football auction allocation engine",
+  "exports": "./src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "test:mutation": "stryker run"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "^9.0.1"
+  }
+}
