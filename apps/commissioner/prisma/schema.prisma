@@ -39,6 +39,7 @@ model Season {
   importBatches PlayerImportBatch[]
   priceFloors PositionPriceFloor[]
   keepers KeeperSelection[]
+  auctionRounds AuctionRound[]
   @@unique([leagueId, year])
 }
 model Team {
@@ -112,6 +113,99 @@ model KeeperSelection {
   cost Int @default(50)
   startingBudget Int
   createdAt DateTime @default(now())
+}
+model AuctionRound {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  roundNumber Int
+  status String
+  inputSnapshotId String?
+  inputHash String?
+  contractVersion String?
+  publishedAt DateTime?
+  supersededAt DateTime?
+  submissions AuctionSubmission[]
+  attempts AuctionAttempt[]
+  decisions AuctionTieDecision[]
+  awards AuctionAward[]
+  @@unique([seasonId, roundNumber, supersededAt])
+}
+model AuctionSubmission {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  seasonTeamId String
+  status String
+  zeroConfirmed Boolean @default(false)
+  bidsJson String
+  bidCount Int
+  updatedAt DateTime @updatedAt
+  @@unique([roundId, seasonTeamId])
+}
+model AuctionAttempt {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  attemptNumber Int
+  inputJson String
+  inputHash String
+  outputJson String
+  outputHash String
+  eliminationsJson String
+  traceJson String
+  status String
+  contractVersion String
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  @@unique([roundId, attemptNumber])
+}
+model AuctionTieDecision {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  tieKey String
+  playerId String
+  amount Int
+  participantTeamIdsJson String
+  preferredTeamId String
+  method String
+  note String?
+  decidedAt DateTime
+  supersededAt DateTime?
+}
+model AuctionAward {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  seasonTeamId String
+  playerId String
+  amount Int
+  bidId String
+  sourceAttemptId String
+  @@unique([roundId, playerId])
+}
+model TeamAuctionBalance {
+  id String @id
+  seasonId String
+  seasonTeamId String
+  roundNumber Int
+  startingBudget Int
+  spent Int
+  remainingBudget Int
+  @@unique([seasonId, seasonTeamId, roundNumber])
+}
+model RosterAssignment {
+  id String @id
+  seasonId String
+  seasonTeamId String
+  playerId String
+  acquisitionSource String
+  auctionRound Int?
+  cost Int?
+  sourceEntityId String
+  supersededAt DateTime?
+  @@unique([seasonId, playerId, supersededAt])
 }
 model AuditEvent {
   id String @id

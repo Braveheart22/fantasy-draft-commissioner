@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { openDurableDatabase } from "../../server/sqlite-maintenance.js";
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 const migrationPaths = [
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170001_u2_persistence/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170002_u3_setup/migration.sql"),
+  join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170003_u4_auction/migration.sql"),
 ];
 
 function schemaVersion(database: Database.Database): number | undefined {
@@ -25,6 +26,9 @@ export function applyMigrations(database: Database.Database): void {
     for (const path of migrationPaths) database.exec(readFileSync(path, "utf8"));
   } else if (version === 1) {
     database.exec(readFileSync(migrationPaths[1]!, "utf8"));
+    database.exec(readFileSync(migrationPaths[2]!, "utf8"));
+  } else if (version === 2) {
+    database.exec(readFileSync(migrationPaths[2]!, "utf8"));
   }
   const integrity = database.pragma("integrity_check", { simple: true });
   if (integrity !== "ok") throw new Error(`SQLite integrity check failed: ${String(integrity)}`);

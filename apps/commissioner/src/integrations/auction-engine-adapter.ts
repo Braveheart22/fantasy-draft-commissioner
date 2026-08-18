@@ -4,10 +4,15 @@ import type {
   CommissionerAuctionInput,
   EngineAuctionInput,
 } from "../application/ports/auction-engine.js";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // Phase 1 intentionally remains JavaScript and is the immutable public boundary.
-// @ts-expect-error The accepted Phase 1 package has no declaration file.
-import { resolveAuction } from "../../../../src/index.js";
+const developmentEngine = new URL("../../../../src/index.js", import.meta.url);
+const productionEngine = new URL("../../../../../src/index.js", import.meta.url);
+// The compiled application is one directory deeper; both URLs point to the same frozen root export.
+const engineModule = await import((existsSync(fileURLToPath(developmentEngine)) ? developmentEngine : productionEngine).href) as { resolveAuction: (input: EngineAuctionInput) => unknown };
+const { resolveAuction } = engineModule;
 
 export class AuctionMappingError extends Error {
   readonly problems: string[];

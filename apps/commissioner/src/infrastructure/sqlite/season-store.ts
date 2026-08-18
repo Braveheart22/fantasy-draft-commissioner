@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { assertLifecycleTransition } from "../../application/commands/lifecycle.js";
+import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRoundSummary, TieDecisionInput } from "../../application/auction/auction-repository.js";
+import type { AuctionEngineResult, CommissionerAuctionInput } from "../../application/ports/auction-engine.js";
 import type { ActorDescriptor, CommandMetadata, SeasonRecord, SeasonRepository, SeasonTransaction } from "../../application/ports/season-repository.js";
 import { LifecycleState } from "../../application/ports/season-repository.js";
 import { PLAYER_POSITIONS, type ImportPreview, type ImportRow, type PlayerInput, type SetupRepository, type SetupSummary, type TeamInput } from "../../application/setup/setup-repository.js";
@@ -38,7 +40,10 @@ function parseRows(content: string, format: "csv" | "json"): Array<Record<string
   return lines.map(line => Object.fromEntries(line.split(",").map((value, index) => [headers[index], value.trim()])));
 }
 
-export class PrismaSeasonStore implements SeasonRepository, SetupRepository {
+const ENGINE_CONTRACT_VERSION = "phase1/1";
+const hashJson = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -278,6 +283,113 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository {
     const floorMap = Object.fromEntries(floors.map(floor => [floor.position, floor.minimumBid]));
     return { season, teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })), players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return ({ id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available }); }), floors: floorMap };
   }
+
+  async openRound(metadata: CommandMetadata, roundNumber: AuctionRoundNumber): Promise<AuctionRoundSummary> {
+    const expected = roundNumber === 1 ? LifecycleState.KEEPERS_LOCKED : LifecycleState.R1_PUBLISHED;
+    await this.setupCommand(metadata, async database => {
+      const season = await database.season.findUniqueOrThrow({ where: { id: metadata.seasonId } });
+      const existing = await database.auctionRound.findFirst({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } });
+      if (existing) return;
+      if (season.state !== expected) throw new Error(`Round ${roundNumber} cannot open from ${season.state}`);
+      const teams = await database.seasonTeam.findMany({ where: { seasonId: metadata.seasonId, active: true }, include: { keeper: true }, orderBy: { seedOrder: "asc" } });
+      const roundId = randomUUID();
+      await database.auctionRound.create({ data: { id: roundId, seasonId: metadata.seasonId, roundNumber, status: "BIDDING" } });
+      for (const team of teams) {
+        const previous = roundNumber === 2 ? await database.teamAuctionBalance.findUniqueOrThrow({ where: { seasonId_seasonTeamId_roundNumber: { seasonId: metadata.seasonId, seasonTeamId: team.id, roundNumber: 1 } } }) : undefined;
+        const startingBudget = roundNumber === 1 ? (team.keeper ? 300 : 350) : 150 + previous!.remainingBudget;
+        await database.teamAuctionBalance.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, seasonTeamId: team.id, roundNumber, startingBudget, spent: 0, remainingBudget: startingBudget } });
+        await database.auctionSubmission.create({ data: { id: randomUUID(), roundId, seasonTeamId: team.id, status: "DRAFT", bidsJson: "[]", bidCount: 0 } });
+      }
+      await database.season.update({ where: { id: metadata.seasonId }, data: { state: roundNumber === 1 ? LifecycleState.R1_BIDDING : LifecycleState.R2_BIDDING, rowVersion: { increment: 1 } } });
+    });
+    return this.summary(metadata.actor, metadata.seasonId, roundNumber);
+  }
+
+  async saveSubmission(metadata: CommandMetadata, roundNumber: AuctionRoundNumber, seasonTeamId: string, bids: AuctionBidDraft[], finalize: boolean, confirmZero: boolean): Promise<void> {
+    await this.setupCommand(metadata, async database => {
+      const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } });
+      if (round.status !== "BIDDING") throw new Error("Locked auction input is immutable");
+      const submission = await database.auctionSubmission.findUniqueOrThrow({ where: { roundId_seasonTeamId: { roundId: round.id, seasonTeamId } } });
+      const team = await database.seasonTeam.findUniqueOrThrow({ where: { id: seasonTeamId } });
+      if (team.seasonId !== metadata.seasonId) throw new Error("Team does not belong to season");
+      const seen = new Set<string>();
+      for (const bid of bids) {
+        if (seen.has(bid.playerId)) throw new Error("A team cannot bid on the same player twice"); seen.add(bid.playerId);
+        const player = await database.player.findFirst({ where: { id: bid.playerId, seasonId: metadata.seasonId, available: true } });
+        if (!player) throw new Error(`Player is unavailable: ${bid.playerId}`);
+      }
+      const encoded = bids.map((bid, index) => ({ bidId: `${submission.id}:${index + 1}`, priority: (index + 1) as 1 | 2 | 3, ...bid }));
+      await database.auctionSubmission.update({ where: { id: submission.id }, data: { bidsJson: JSON.stringify(encoded), bidCount: bids.length, status: finalize ? "FINAL" : "DRAFT", zeroConfirmed: bids.length === 0 && confirmZero } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+    });
+  }
+
+  async lockRound(metadata: CommandMetadata, roundNumber: AuctionRoundNumber, rosterRules: CommissionerAuctionInput["rosterRules"]): Promise<CommissionerAuctionInput> {
+    return this.setupCommand(metadata, async (database, auditId) => {
+      const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } });
+      if (round.status !== "BIDDING") throw new Error("Round is not open for locking");
+      const submissions = await database.auctionSubmission.findMany({ where: { roundId: round.id } });
+      if (submissions.some(item => item.status !== "FINAL" || (item.bidCount === 0 && !item.zeroConfirmed))) throw new Error("Every team must finalize its submission; zero bids require confirmation");
+      const input = await this.buildAuctionInput(database, metadata.seasonId, roundNumber, rosterRules, []);
+      const payloadJson = JSON.stringify(input); const sha256 = hashJson(input); const snapshotId = randomUUID();
+      await database.frozenSnapshot.create({ data: { id: snapshotId, seasonId: metadata.seasonId, kind: `AUCTION_R${roundNumber}_INPUT`, schemaVersion: 1, payloadJson, sha256, sourceAuditEventId: auditId } });
+      await database.auctionRound.update({ where: { id: round.id }, data: { status: "LOCKED", inputSnapshotId: snapshotId, inputHash: sha256, contractVersion: ENGINE_CONTRACT_VERSION } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+      return input;
+    });
+  }
+
+  private async buildAuctionInput(database: any, seasonId: string, roundNumber: AuctionRoundNumber, rosterRules: CommissionerAuctionInput["rosterRules"], tiePrecedence: CommissionerAuctionInput["tiePrecedence"]): Promise<CommissionerAuctionInput> {
+    const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId, roundNumber, supersededAt: null } });
+    const [teams, players, floors, submissions, balances, assignments] = await Promise.all([
+      database.seasonTeam.findMany({ where: { seasonId, active: true }, include: { keeper: true }, orderBy: { seedOrder: "asc" } }), database.player.findMany({ where: { seasonId } }), database.positionPriceFloor.findMany({ where: { seasonId } }), database.auctionSubmission.findMany({ where: { roundId: round.id } }), database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber } }), database.rosterAssignment.findMany({ where: { seasonId, supersededAt: null } }),
+    ]);
+    const floorMap = Object.fromEntries(floors.map((f: any) => [f.position, f.minimumBid])); const balanceMap = new Map(balances.map((b: any) => [b.seasonTeamId, b.startingBudget])); const submissionMap = new Map(submissions.map((s: any) => [s.seasonTeamId, s]));
+    return { teams: teams.map((team: any) => ({ teamId: team.teamId, startingBudget: balanceMap.get(team.id) as number, startingPlayerIds: [...(team.keeper ? [team.keeper.playerId] : []), ...assignments.filter((a: any) => a.seasonTeamId === team.id).map((a: any) => a.playerId)] })), players: players.map((p: any) => ({ playerId: p.id, position: p.position, minimumBid: p.explicitMinimumBid ?? floorMap[p.position], available: p.available })), bids: teams.flatMap((team: any) => JSON.parse((submissionMap.get(team.id) as any).bidsJson).map((bid: any) => ({ ...bid, teamId: team.teamId }))), rosterRules, tiePrecedence };
+  }
+
+  async frozenInput(_actor: ActorDescriptor, seasonId: string, roundNumber: AuctionRoundNumber): Promise<CommissionerAuctionInput> {
+    const round = await this.prisma.auctionRound.findFirstOrThrow({ where: { seasonId, roundNumber, supersededAt: null } }); if (!round.inputSnapshotId) throw new Error("Round has no frozen input"); const snapshot = await this.prisma.frozenSnapshot.findUniqueOrThrow({ where: { id: round.inputSnapshotId } }); return JSON.parse(snapshot.payloadJson);
+  }
+
+  async recordAttempt(metadata: CommandMetadata, roundNumber: AuctionRoundNumber, input: CommissionerAuctionInput, result: AuctionEngineResult): Promise<void> {
+    await this.setupCommand(metadata, async database => {
+      const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } });
+      if (!round.inputHash) throw new Error("Round has no frozen input");
+      const base = await database.frozenSnapshot.findUniqueOrThrow({ where: { id: round.inputSnapshotId! } }); const frozen = JSON.parse(base.payloadJson); const expected = { ...frozen, tiePrecedence: input.tiePrecedence };
+      if (hashJson(expected) !== hashJson(input)) throw new Error("Resolution input differs from the frozen input and recorded decisions");
+      const attemptNumber = await database.auctionAttempt.count({ where: { roundId: round.id } }) + 1; const outputHash = hashJson(result);
+      await database.auctionAttempt.create({ data: { id: randomUUID(), roundId: round.id, attemptNumber, inputJson: JSON.stringify(input), inputHash: hashJson(input), outputJson: JSON.stringify(result), outputHash, eliminationsJson: JSON.stringify(result.eliminations), traceJson: JSON.stringify(result.trace), status: result.status, contractVersion: ENGINE_CONTRACT_VERSION } });
+      await database.auctionRound.update({ where: { id: round.id }, data: { status: result.status === "RESOLVED" ? "REVIEW" : "TIE_PAUSED" } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { state: result.status === "RESOLVED" ? (roundNumber === 1 ? LifecycleState.R1_REVIEW : LifecycleState.R2_REVIEW) : (roundNumber === 1 ? LifecycleState.R1_TIE_PAUSED : LifecycleState.R2_TIE_PAUSED), rowVersion: { increment: 1 } } });
+    });
+  }
+
+  async recordTieDecision(metadata: CommandMetadata, roundNumber: AuctionRoundNumber, decision: TieDecisionInput): Promise<CommissionerAuctionInput> {
+    return this.setupCommand(metadata, async database => {
+      const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } }); if (round.status !== "TIE_PAUSED") throw new Error("Round is not paused for a tie");
+      const last = await database.auctionAttempt.findFirstOrThrow({ where: { roundId: round.id }, orderBy: { attemptNumber: "desc" } }); const result = JSON.parse(last.outputJson) as AuctionEngineResult; const tie = result.unresolvedTies.find(item => item.key === decision.tieKey);
+      if (!tie || tie.playerId !== decision.playerId || tie.amount !== decision.amount || JSON.stringify([...tie.teamIds].sort()) !== JSON.stringify([...decision.participantTeamIds].sort()) || !tie.teamIds.includes(decision.preferredTeamId)) throw new Error("Tie decision does not match an unresolved tie");
+      if (!decision.method.trim() || !decision.decidedAt) throw new Error("External method and timestamp are required");
+      await database.auctionTieDecision.create({ data: { id: randomUUID(), roundId: round.id, tieKey: decision.tieKey, playerId: decision.playerId, amount: decision.amount, participantTeamIdsJson: JSON.stringify(decision.participantTeamIds), preferredTeamId: decision.preferredTeamId, method: decision.method, note: decision.note ?? null, decidedAt: new Date(decision.decidedAt) } });
+      const base = await database.frozenSnapshot.findUniqueOrThrow({ where: { id: round.inputSnapshotId! } }); const input = JSON.parse(base.payloadJson) as CommissionerAuctionInput; const decisions = await database.auctionTieDecision.findMany({ where: { roundId: round.id, supersededAt: null }, orderBy: { decidedAt: "asc" } });
+      return { ...input, tiePrecedence: decisions.map((d: any) => ({ playerId: d.playerId, amount: d.amount, participantTeamIds: JSON.parse(d.participantTeamIdsJson), preferredTeamId: d.preferredTeamId })) };
+    });
+  }
+
+  async publish(metadata: CommandMetadata, roundNumber: AuctionRoundNumber): Promise<void> {
+    await this.setupCommand(metadata, async database => {
+      const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } }); if (round.status === "PUBLISHED") return; if (round.status !== "REVIEW") throw new Error("Only a resolved round may be published");
+      const attempt = await database.auctionAttempt.findFirstOrThrow({ where: { roundId: round.id, status: "RESOLVED", supersededAt: null }, orderBy: { attemptNumber: "desc" } }); const result = JSON.parse(attempt.outputJson) as AuctionEngineResult; const teams = await database.seasonTeam.findMany({ where: { seasonId: metadata.seasonId } }); const byTeamId = new Map(teams.map((t: any) => [t.teamId, t.id]));
+      for (const award of result.awards) { const seasonTeamId = byTeamId.get(award.teamId); if (!seasonTeamId) throw new Error(`Unknown award team ${award.teamId}`); await database.auctionAward.create({ data: { id: randomUUID(), roundId: round.id, seasonTeamId, playerId: award.playerId, amount: award.amount, bidId: award.bidId, sourceAttemptId: attempt.id } }); await database.rosterAssignment.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, seasonTeamId, playerId: award.playerId, acquisitionSource: "AUCTION", auctionRound: roundNumber, cost: award.amount, sourceEntityId: attempt.id } }); await database.player.update({ where: { id: award.playerId }, data: { available: false } }); }
+      for (const teamResult of result.teamResults) { const seasonTeamId = byTeamId.get(teamResult.teamId)!; await database.teamAuctionBalance.update({ where: { seasonId_seasonTeamId_roundNumber: { seasonId: metadata.seasonId, seasonTeamId, roundNumber } }, data: { spent: teamResult.spent, remainingBudget: teamResult.remainingBudget } }); }
+      await database.auctionRound.update({ where: { id: round.id }, data: { status: "PUBLISHED", publishedAt: new Date() } }); await database.season.update({ where: { id: metadata.seasonId }, data: { state: roundNumber === 1 ? LifecycleState.R1_PUBLISHED : LifecycleState.R2_PUBLISHED, rowVersion: { increment: 1 } } });
+    });
+  }
+
+  async reopen(metadata: CommandMetadata, roundNumber: AuctionRoundNumber): Promise<void> { await this.setupCommand(metadata, async database => { const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } }); if (round.status === "PUBLISHED") throw new Error("Published rounds require upstream correction rollback"); await database.auctionAttempt.updateMany({ where: { roundId: round.id, supersededAt: null }, data: { supersededAt: new Date() } }); await database.auctionTieDecision.updateMany({ where: { roundId: round.id, supersededAt: null }, data: { supersededAt: new Date() } }); await database.auctionRound.update({ where: { id: round.id }, data: { status: "BIDDING", inputSnapshotId: null, inputHash: null, contractVersion: null } }); await database.auctionSubmission.updateMany({ where: { roundId: round.id }, data: { status: "DRAFT" } }); await database.season.update({ where: { id: metadata.seasonId }, data: { state: roundNumber === 1 ? LifecycleState.R1_BIDDING : LifecycleState.R2_BIDDING, rowVersion: { increment: 1 } } }); }); }
+
+  async summary(_actor: ActorDescriptor, seasonId: string, roundNumber: AuctionRoundNumber, reveal = false): Promise<AuctionRoundSummary> { const round = await this.prisma.auctionRound.findFirstOrThrow({ where: { seasonId, roundNumber, supersededAt: null } }); const [submissions, teams, attempts, balances] = await Promise.all([this.prisma.auctionSubmission.findMany({ where: { roundId: round.id } }), this.prisma.seasonTeam.findMany({ where: { seasonId }, orderBy: { seedOrder: "asc" } }), this.prisma.auctionAttempt.findMany({ where: { roundId: round.id, supersededAt: null }, orderBy: { attemptNumber: "asc" } }), this.prisma.teamAuctionBalance.findMany({ where: { seasonId, roundNumber } })]); const submissionMap = new Map(submissions.map(s => [s.seasonTeamId, s])); const canReveal = reveal && round.status !== "BIDDING"; return { roundId: round.id, roundNumber, status: round.status, revealed: canReveal, teams: teams.map(team => { const item = submissionMap.get(team.id)!; return { seasonTeamId: team.id, teamId: team.teamId, displayName: team.displayName, status: item.status, bidCount: item.bidCount, ...(canReveal ? { bids: JSON.parse(item.bidsJson) } : {}) }; }), attempts: attempts.map(a => ({ attemptNumber: a.attemptNumber, status: a.status, inputHash: a.inputHash, outputHash: a.outputHash, unresolvedTies: (JSON.parse(a.outputJson) as AuctionEngineResult).unresolvedTies })), balances: balances.map(b => ({ seasonTeamId: b.seasonTeamId, startingBudget: b.startingBudget, spent: b.spent, remainingBudget: b.remainingBudget })) }; }
   async close(): Promise<void> { await this.prisma.$disconnect(); }
 }
 
