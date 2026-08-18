@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model SchemaMetadata {
+  singleton Int @id @default(1)
+  version Int
+  applicationVersion String
+}
+model League {
+  id String @id
+  name String
+  seasons Season[]
+  teams Team[]
+}
+model Season {
+  id String @id
+  leagueId String
+  league League @relation(fields: [leagueId], references: [id])
+  year Int
+  name String
+  state String
+  teamCount Int
+  rowVersion Int @default(0)
+  active Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  seasonTeams SeasonTeam[]
+  auditEvents AuditEvent[]
+  snapshots FrozenSnapshot[]
+  checkpoints Checkpoint[]
+  @@unique([leagueId, year])
+}
+model Team {
+  id String @id
+  leagueId String
+  league League @relation(fields: [leagueId], references: [id])
+  franchiseName String
+  seasons SeasonTeam[]
+}
+model SeasonTeam {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  teamId String
+  team Team @relation(fields: [teamId], references: [id])
+  displayName String
+  seedOrder Int
+  active Boolean @default(true)
+  @@unique([seasonId, teamId])
+  @@unique([seasonId, seedOrder])
+}
+model AuditEvent {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sequence Int
+  actorType String
+  actorLabel String
+  commandType String
+  entityType String?
+  entityId String?
+  correlationId String
+  idempotencyKey String
+  reason String?
+  beforeJson String?
+  afterJson String?
+  resultJson String?
+  createdAt DateTime @default(now())
+  snapshots FrozenSnapshot[]
+  checkpoints Checkpoint[]
+  @@unique([seasonId, sequence])
+  @@unique([seasonId, actorType, idempotencyKey])
+}
+model FrozenSnapshot {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  kind String
+  schemaVersion Int
+  payloadJson String
+  sha256 String
+  createdAt DateTime @default(now())
+  sourceAuditEventId String
+  sourceAuditEvent AuditEvent @relation(fields: [sourceAuditEventId], references: [id])
+  checkpoints Checkpoint[]
+}
+model Checkpoint {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  kind String
+  seasonVersion Int
+  stateSnapshotId String
+  stateSnapshot FrozenSnapshot @relation(fields: [stateSnapshotId], references: [id])
+  sourceAuditEventId String
+  sourceAuditEvent AuditEvent @relation(fields: [sourceAuditEventId], references: [id])
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+}
