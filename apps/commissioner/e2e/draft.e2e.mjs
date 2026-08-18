@@ -1,0 +1,15 @@
+import { expect, test } from "@playwright/test";
+
+test("external order tie resolution drives a complete fixed-order draft loop", async ({ request }) => {
+  let serial = 0; const seasonId = `draft-e2e-${Date.now()}`; const headers = data => ({ ...(data === undefined ? {} : { "content-type": "application/json" }), "idempotency-key": `draft-${++serial}` });
+  const send = async (method, path, data, ok = true) => { const response = await request.fetch(path, { method, headers: headers(data), ...(data === undefined ? {} : { data }) }); expect(response.ok(), `${method} ${path}: ${await response.text()}`).toBe(ok); return response.json(); };
+  const rules = { limits: { QB: 2, RB: 2, WR: 3, TE: 2, K: 2, DST: 2 }, flexEligible: ["RB", "WR", "TE"], flexCapacity: 1 };
+  const positions = ["QB", "QB", "RB", "RB", "RB", "WR", "WR", "WR", "TE", "TE", "K", "K", "DST", "DST"];
+  await send("POST", "/api/setup/seasons", { seasonId, leagueId: `league-${seasonId}`, year: 2026, name: "Draft browser proof", teamCount: 2 });
+  await send("PUT", `/api/setup/${seasonId}/teams`, { teams: [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }] });
+  for (let i = 0; i < 28; i++) await send("POST", `/api/setup/${seasonId}/custom-players`, { id: `${seasonId}-p${i}`, name: `Player ${i}`, position: positions[i % 14] });
+  await send("PUT", `/api/setup/${seasonId}/pricing`, { floors: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 } }); await send("POST", `/api/setup/${seasonId}/lock`, { rosterCapacity: 14 });
+  for (const round of [1, 2]) { const opened = await send("POST", `/api/auction/${seasonId}/${round}/open`); for (const team of opened.teams) await send("PUT", `/api/auction/${seasonId}/${round}/teams/${team.seasonTeamId}`, { bids: [], finalize: true, confirmZero: true }); expect((await send("POST", `/api/auction/${seasonId}/${round}/lock`, {})).status).toBe("RESOLVED"); await send("POST", `/api/auction/${seasonId}/${round}/publish`); }
+  const paused = await send("POST", `/api/draft/${seasonId}/order/calculate`); expect(paused.status).toBe("TIE_PAUSED"); const tie = paused.ties[0]; await send("POST", `/api/draft/${seasonId}/order/ties`, { balance: tie.balance, participantTeamIds: tie.seasonTeamIds, precedenceTeamIds: [...tie.seasonTeamIds].reverse(), method: "external draw", decidedAt: "2026-08-17T00:00:00.000Z" }); const order = await send("POST", `/api/draft/${seasonId}/order/finalize`); expect(order.order).toHaveLength(2);
+  for (let round = 0; round < 14; round++) for (let position = 0; position < 2; position++) { const result = await send("POST", `/api/draft/${seasonId}/picks`, { seasonTeamId: order.order[position].seasonTeamId, playerId: `${seasonId}-p${position * 14 + round}`, rosterRules: rules }); if (round === 1 && position === 0) expect(result.currentSeasonTeamId).toBe(order.order[1].seasonTeamId); if (round === 1 && position === 1) expect(result.currentSeasonTeamId).toBe(order.order[0].seasonTeamId); if (round === 13 && position === 1) expect(result.status).toBe("COMPLETED"); }
+});

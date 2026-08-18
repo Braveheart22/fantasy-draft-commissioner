@@ -10,6 +10,9 @@ import { auctionEngineAdapter } from "../integrations/auction-engine-adapter.js"
 import { openSeasonStore } from "../infrastructure/sqlite/season-store.js";
 import { registerSetupRoutes } from "../routes/setup/setup-routes.js";
 import { registerAuctionRoutes } from "../routes/auction/auction-routes.js";
+import { DraftOrderService } from "../application/draft-order/draft-order-service.js";
+import { ConventionalDraftService } from "../application/conventional-draft/conventional-draft-service.js";
+import { registerDraftRoutes } from "../routes/draft/draft-routes.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -47,9 +50,12 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const store = await openSeasonStore(join(dataDirectory, "commissioner.db"));
   const setup = new SetupService(store, store);
   const auction = new AuctionService(store, auctionEngineAdapter);
+  const order = new DraftOrderService(store);
+  const draft = new ConventionalDraftService(store);
   server.get("/health", async () => ({ status: "ok", dataDirectory }));
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
+  await registerDraftRoutes(server, order, draft);
   await registerBuiltUi(server);
   try {
     await server.listen({ host: LOOPBACK_HOST, port: options.port ?? 4173 });

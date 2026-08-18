@@ -40,6 +40,7 @@ model Season {
   priceFloors PositionPriceFloor[]
   keepers KeeperSelection[]
   auctionRounds AuctionRound[]
+  conventionalDraft ConventionalDraft?
   @@unique([leagueId, year])
 }
 model Team {
@@ -61,6 +62,61 @@ model SeasonTeam {
   @@unique([seasonId, teamId])
   @@unique([seasonId, seedOrder])
   keeper KeeperSelection?
+  draftOrderEntries DraftOrderEntry[]
+  draftPicks DraftPick[]
+}
+model ConventionalDraft {
+  id String @id
+  seasonId String @unique
+  season Season @relation(fields: [seasonId], references: [id])
+  status String
+  orderSnapshotId String?
+  orderHash String?
+  contractVersion String
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  orderEntries DraftOrderEntry[]
+  tieDecisions DraftOrderTieDecision[]
+  picks DraftPick[]
+}
+model DraftOrderEntry {
+  id String @id
+  conventionalDraftId String
+  conventionalDraft ConventionalDraft @relation(fields: [conventionalDraftId], references: [id])
+  orderPosition Int
+  seasonTeamId String
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+  remainingBalance Int
+  @@unique([conventionalDraftId, orderPosition])
+  @@unique([conventionalDraftId, seasonTeamId])
+}
+model DraftOrderTieDecision {
+  id String @id
+  conventionalDraftId String
+  conventionalDraft ConventionalDraft @relation(fields: [conventionalDraftId], references: [id])
+  balance Int
+  participantTeamIdsJson String
+  precedenceTeamIdsJson String
+  method String
+  note String?
+  decidedAt DateTime
+  @@unique([conventionalDraftId, balance])
+}
+model DraftPick {
+  id String @id
+  conventionalDraftId String
+  conventionalDraft ConventionalDraft @relation(fields: [conventionalDraftId], references: [id])
+  overallPick Int
+  roundNumber Int
+  orderPosition Int
+  seasonTeamId String
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+  playerId String
+  active Boolean @default(true)
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([conventionalDraftId, overallPick])
+  @@unique([conventionalDraftId, playerId])
 }
 model Player {
   id String @id

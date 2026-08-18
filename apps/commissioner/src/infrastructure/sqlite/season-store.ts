@@ -6,6 +6,9 @@ import type { AuctionEngineResult, CommissionerAuctionInput } from "../../applic
 import type { ActorDescriptor, CommandMetadata, SeasonRecord, SeasonRepository, SeasonTransaction } from "../../application/ports/season-repository.js";
 import { LifecycleState } from "../../application/ports/season-repository.js";
 import { PLAYER_POSITIONS, type ImportPreview, type ImportRow, type PlayerInput, type SetupRepository, type SetupSummary, type TeamInput } from "../../application/setup/setup-repository.js";
+import type { DraftOrderDecision, DraftOrderRepository, DraftOrderSummary } from "../../application/draft-order/draft-order-repository.js";
+import type { ConventionalDraftRepository, DraftPickInput } from "../../application/conventional-draft/conventional-draft-repository.js";
+import { canAddPlayerThroughPhase1, validateRosterThroughPhase1 } from "../../integrations/roster-validator-adapter.js";
 import { PrismaClient } from "../../generated/prisma/client.js";
 import { migrateDatabaseInPlace } from "./migrations.js";
 export { migrateDatabaseCopySafely } from "./migrations.js";
@@ -42,8 +45,9 @@ function parseRows(content: string, format: "csv" | "json"): Array<Record<string
 
 const ENGINE_CONTRACT_VERSION = "phase1/1";
 const hashJson = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+function groupBalances<T extends { remainingBudget: number }>(items: T[]): Map<number, T[]> { const groups = new Map<number, T[]>(); for (const item of items) groups.set(item.remainingBudget, [...(groups.get(item.remainingBudget) ?? []), item]); return groups; }
 
-export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository {
+export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -388,6 +392,86 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   }
 
   async reopen(metadata: CommandMetadata, roundNumber: AuctionRoundNumber): Promise<void> { await this.setupCommand(metadata, async database => { const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId: metadata.seasonId, roundNumber, supersededAt: null } }); if (round.status === "PUBLISHED") throw new Error("Published rounds require upstream correction rollback"); await database.auctionAttempt.updateMany({ where: { roundId: round.id, supersededAt: null }, data: { supersededAt: new Date() } }); await database.auctionTieDecision.updateMany({ where: { roundId: round.id, supersededAt: null }, data: { supersededAt: new Date() } }); await database.auctionRound.update({ where: { id: round.id }, data: { status: "BIDDING", inputSnapshotId: null, inputHash: null, contractVersion: null } }); await database.auctionSubmission.updateMany({ where: { roundId: round.id }, data: { status: "DRAFT" } }); await database.season.update({ where: { id: metadata.seasonId }, data: { state: roundNumber === 1 ? LifecycleState.R1_BIDDING : LifecycleState.R2_BIDDING, rowVersion: { increment: 1 } } }); }); }
+
+  async calculate(metadata: CommandMetadata): Promise<DraftOrderSummary> {
+    await this.setupCommand(metadata, async (database, auditId) => {
+      const season = await database.season.findUniqueOrThrow({ where: { id: metadata.seasonId } });
+      if (season.state !== LifecycleState.R2_PUBLISHED) throw new Error("Draft order requires committed Round 2 results");
+      if (await database.conventionalDraft.findUnique({ where: { seasonId: metadata.seasonId } })) return;
+      const teams = await database.seasonTeam.findMany({ where: { seasonId: metadata.seasonId, active: true } });
+      const balances = await database.teamAuctionBalance.findMany({ where: { seasonId: metadata.seasonId, roundNumber: 2 } });
+      if (balances.length !== teams.length) throw new Error("Every team requires a committed Round 2 balance");
+      const draftId = randomUUID();
+      const groups = groupBalances(balances);
+      const hasTies = [...groups.values()].some(group => group.length > 1);
+      await database.conventionalDraft.create({ data: { id: draftId, seasonId: metadata.seasonId, status: hasTies ? "TIE_PAUSED" : "FINAL", contractVersion: "fixed-order/1" } });
+      if (!hasTies) {
+        const sorted = [...balances].sort((a, b) => b.remainingBudget - a.remainingBudget);
+        for (const [index, balance] of sorted.entries()) await database.draftOrderEntry.create({ data: { id: randomUUID(), conventionalDraftId: draftId, orderPosition: index + 1, seasonTeamId: balance.seasonTeamId, remainingBalance: balance.remainingBudget } });
+        const payload = sorted.map(item => ({ seasonTeamId: item.seasonTeamId, remainingBalance: item.remainingBudget })); const snapshotId = randomUUID(); const sha256 = hashJson(payload);
+        await database.frozenSnapshot.create({ data: { id: snapshotId, seasonId: metadata.seasonId, kind: "DRAFT_ORDER", schemaVersion: 1, payloadJson: JSON.stringify(payload), sha256, sourceAuditEventId: auditId } });
+        await database.conventionalDraft.update({ where: { id: draftId }, data: { orderSnapshotId: snapshotId, orderHash: sha256 } });
+      }
+      await database.season.update({ where: { id: metadata.seasonId }, data: { state: hasTies ? LifecycleState.ORDER_TIE_PAUSED : LifecycleState.ORDER_FINAL, rowVersion: { increment: 1 } } });
+    });
+    return this.draftSummary(metadata.actor, metadata.seasonId);
+  }
+
+  async recordDraftOrderTieDecision(metadata: CommandMetadata, decision: DraftOrderDecision): Promise<DraftOrderSummary> {
+    await this.setupCommand(metadata, async database => {
+      const draft = await database.conventionalDraft.findUniqueOrThrow({ where: { seasonId: metadata.seasonId } });
+      if (draft.status !== "TIE_PAUSED") throw new Error("Draft order is not awaiting tie precedence");
+      const balances = await database.teamAuctionBalance.findMany({ where: { seasonId: metadata.seasonId, roundNumber: 2, remainingBudget: decision.balance } });
+      const expected = balances.map(item => item.seasonTeamId).sort();
+      if (expected.length < 2 || JSON.stringify([...decision.participantTeamIds].sort()) !== JSON.stringify(expected)) throw new Error("Tie participants do not match the committed balance group");
+      if (decision.precedenceTeamIds.length !== expected.length || new Set(decision.precedenceTeamIds).size !== expected.length || JSON.stringify([...decision.precedenceTeamIds].sort()) !== JSON.stringify(expected)) throw new Error("Tie precedence must contain every tied team exactly once");
+      if (!decision.method.trim() || !decision.decidedAt) throw new Error("External method and timestamp are required");
+      await database.draftOrderTieDecision.create({ data: { id: randomUUID(), conventionalDraftId: draft.id, balance: decision.balance, participantTeamIdsJson: JSON.stringify(decision.participantTeamIds), precedenceTeamIdsJson: JSON.stringify(decision.precedenceTeamIds), method: decision.method, note: decision.note ?? null, decidedAt: new Date(decision.decidedAt) } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+    });
+    return this.draftSummary(metadata.actor, metadata.seasonId);
+  }
+
+  async finalize(metadata: CommandMetadata): Promise<DraftOrderSummary> {
+    await this.setupCommand(metadata, async (database, auditId) => {
+      const draft = await database.conventionalDraft.findUniqueOrThrow({ where: { seasonId: metadata.seasonId } });
+      if (draft.status === "FINAL" || draft.status === "IN_PROGRESS" || draft.status === "COMPLETED") return;
+      const balances = await database.teamAuctionBalance.findMany({ where: { seasonId: metadata.seasonId, roundNumber: 2 } });
+      const decisions = await database.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id } });
+      const decisionMap = new Map(decisions.map(item => [item.balance, JSON.parse(item.precedenceTeamIdsJson) as string[]]));
+      const groups = [...groupBalances(balances)].sort((a, b) => b[0] - a[0]); const ordered: typeof balances = [];
+      for (const [balance, group] of groups) { if (group.length === 1) ordered.push(group[0]!); else { const precedence = decisionMap.get(balance); if (!precedence) throw new Error(`Missing external precedence for tied balance ${balance}`); const byId = new Map(group.map(item => [item.seasonTeamId, item])); ordered.push(...precedence.map(id => byId.get(id)!)); } }
+      for (const [index, balance] of ordered.entries()) await database.draftOrderEntry.create({ data: { id: randomUUID(), conventionalDraftId: draft.id, orderPosition: index + 1, seasonTeamId: balance.seasonTeamId, remainingBalance: balance.remainingBudget } });
+      const payload = ordered.map(item => ({ seasonTeamId: item.seasonTeamId, remainingBalance: item.remainingBudget })); const snapshotId = randomUUID(); const sha256 = hashJson(payload);
+      await database.frozenSnapshot.create({ data: { id: snapshotId, seasonId: metadata.seasonId, kind: "DRAFT_ORDER", schemaVersion: 1, payloadJson: JSON.stringify(payload), sha256, sourceAuditEventId: auditId } });
+      await database.conventionalDraft.update({ where: { id: draft.id }, data: { status: "FINAL", orderSnapshotId: snapshotId, orderHash: sha256 } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { state: LifecycleState.ORDER_FINAL, rowVersion: { increment: 1 } } });
+    });
+    return this.draftSummary(metadata.actor, metadata.seasonId);
+  }
+
+  async makePick(metadata: CommandMetadata, input: DraftPickInput): Promise<DraftOrderSummary> {
+    await this.setupCommand(metadata, async database => {
+      const draft = await database.conventionalDraft.findUniqueOrThrow({ where: { seasonId: metadata.seasonId } });
+      if (draft.status !== "FINAL" && draft.status !== "IN_PROGRESS") throw new Error("Conventional draft is not open");
+      const order = await database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }); const pickCount = await database.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } });
+      const current = order[pickCount % order.length]; if (!current || current.seasonTeamId !== input.seasonTeamId) throw new Error("Only the team currently on the clock may pick");
+      const player = await database.player.findFirst({ where: { id: input.playerId, seasonId: metadata.seasonId, available: true } }); if (!player) throw new Error("Player is unavailable");
+      const assignments = await database.rosterAssignment.findMany({ where: { seasonId: metadata.seasonId, seasonTeamId: input.seasonTeamId, supersededAt: null } }); const players = await database.player.findMany({ where: { id: { in: assignments.map(item => item.playerId) } } });
+      const result = canAddPlayerThroughPhase1(players.map(item => item.position), player.position, input.rosterRules); if (!result.legal) throw new Error(`Illegal partial roster: ${result.reason}`);
+      const overallPick = pickCount + 1; const pickId = randomUUID(); await database.draftPick.create({ data: { id: pickId, conventionalDraftId: draft.id, overallPick, roundNumber: Math.floor(pickCount / order.length) + 1, orderPosition: (pickCount % order.length) + 1, seasonTeamId: input.seasonTeamId, playerId: input.playerId } });
+      await database.rosterAssignment.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, seasonTeamId: input.seasonTeamId, playerId: input.playerId, acquisitionSource: "CONVENTIONAL", sourceEntityId: pickId } }); await database.player.update({ where: { id: input.playerId }, data: { available: false } });
+      const total = await database.seasonTeam.count({ where: { seasonId: metadata.seasonId, active: true } }) * 14; const complete = overallPick + await database.rosterAssignment.count({ where: { seasonId: metadata.seasonId, acquisitionSource: { not: "CONVENTIONAL" }, supersededAt: null } }) === total;
+      if (complete) { const allAssignments = await database.rosterAssignment.findMany({ where: { seasonId: metadata.seasonId, supersededAt: null } }); for (const team of order) { const ids = allAssignments.filter(item => item.seasonTeamId === team.seasonTeamId).map(item => item.playerId); if (ids.length !== 14) throw new Error("Draft cannot complete until every team has exactly 14 players"); const rosterPlayers = await database.player.findMany({ where: { id: { in: ids } } }); if (!validateRosterThroughPhase1(rosterPlayers.map(item => item.position), input.rosterRules).legal) throw new Error("Draft cannot complete with an illegal roster"); } }
+      await database.conventionalDraft.update({ where: { id: draft.id }, data: { status: complete ? "COMPLETED" : "IN_PROGRESS", ...(complete ? { completedAt: new Date() } : {}) } }); await database.season.update({ where: { id: metadata.seasonId }, data: { state: complete ? LifecycleState.COMPLETED : LifecycleState.CONVENTIONAL_DRAFT, rowVersion: { increment: 1 } } });
+    });
+    return this.draftSummary(metadata.actor, metadata.seasonId);
+  }
+
+  async draftSummary(_actor: ActorDescriptor, seasonId: string): Promise<DraftOrderSummary> {
+    const draft = await this.prisma.conventionalDraft.findUniqueOrThrow({ where: { seasonId } }); const [entries, teams, balances, decisions, picks] = await Promise.all([this.prisma.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }), this.prisma.seasonTeam.findMany({ where: { seasonId } }), this.prisma.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }), this.prisma.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id } }), this.prisma.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } })]); const names = new Map(teams.map(team => [team.id, team.displayName])); const decided = new Set(decisions.map(item => item.balance)); const ties = [...groupBalances(balances)].filter(([balance, group]) => group.length > 1 && !decided.has(balance)).map(([balance, group]) => ({ balance, seasonTeamIds: group.map(item => item.seasonTeamId) })); const current = entries.length ? entries[picks % entries.length]?.seasonTeamId : undefined; return { status: draft.status as DraftOrderSummary["status"], ties, order: entries.map(item => ({ orderPosition: item.orderPosition, seasonTeamId: item.seasonTeamId, displayName: names.get(item.seasonTeamId)!, remainingBalance: item.remainingBalance })), nextOverallPick: picks + 1, ...(current && draft.status !== "COMPLETED" ? { currentSeasonTeamId: current } : {}) };
+  }
+
 
   async summary(_actor: ActorDescriptor, seasonId: string, roundNumber: AuctionRoundNumber, reveal = false): Promise<AuctionRoundSummary> { const round = await this.prisma.auctionRound.findFirstOrThrow({ where: { seasonId, roundNumber, supersededAt: null } }); const [submissions, teams, attempts, balances] = await Promise.all([this.prisma.auctionSubmission.findMany({ where: { roundId: round.id } }), this.prisma.seasonTeam.findMany({ where: { seasonId }, orderBy: { seedOrder: "asc" } }), this.prisma.auctionAttempt.findMany({ where: { roundId: round.id, supersededAt: null }, orderBy: { attemptNumber: "asc" } }), this.prisma.teamAuctionBalance.findMany({ where: { seasonId, roundNumber } })]); const submissionMap = new Map(submissions.map(s => [s.seasonTeamId, s])); const canReveal = reveal && round.status !== "BIDDING"; return { roundId: round.id, roundNumber, status: round.status, revealed: canReveal, teams: teams.map(team => { const item = submissionMap.get(team.id)!; return { seasonTeamId: team.id, teamId: team.teamId, displayName: team.displayName, status: item.status, bidCount: item.bidCount, ...(canReveal ? { bids: JSON.parse(item.bidsJson) } : {}) }; }), attempts: attempts.map(a => ({ attemptNumber: a.attemptNumber, status: a.status, inputHash: a.inputHash, outputHash: a.outputHash, unresolvedTies: (JSON.parse(a.outputJson) as AuctionEngineResult).unresolvedTies })), balances: balances.map(b => ({ seasonTeamId: b.seasonTeamId, startingBudget: b.startingBudget, spent: b.spent, remainingBudget: b.remainingBudget })) }; }
   async close(): Promise<void> { await this.prisma.$disconnect(); }
