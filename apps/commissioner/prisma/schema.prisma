@@ -42,7 +42,22 @@ model Season {
   auctionRounds AuctionRound[]
   conventionalDraft ConventionalDraft?
   correctionActions CorrectionAction[]
+  exports ExportRecord[]
   @@unique([leagueId, year])
+}
+model ExportRecord {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  backupId String
+  jsonPath String
+  jsonSha256 String
+  csvPath String
+  csvSha256 String
+  schemaVersion Int
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  @@index([seasonId, createdAt])
 }
 model Team {
   id String @id

@@ -59,7 +59,7 @@ export class CorrectionService {
           if (item.entityType === "DraftPick") {
             db.prepare("UPDATE DraftPick SET active=0,supersededAt=? WHERE id=? AND active=1").run(now, item.id);
             db.prepare("UPDATE RosterAssignment SET supersededAt=? WHERE acquisitionSource='CONVENTIONAL' AND sourceEntityId=? AND supersededAt IS NULL").run(now, item.id);
-          } else if (["AuctionRound", "AuctionAttempt", "AuctionTieDecision", "AuctionAward", "TeamAuctionBalance", "KeeperSelection", "DraftOrderEntry", "DraftOrderTieDecision"].includes(item.entityType)) {
+          } else if (["AuctionRound", "AuctionAttempt", "AuctionTieDecision", "AuctionAward", "TeamAuctionBalance", "KeeperSelection", "DraftOrderEntry", "DraftOrderTieDecision", "ExportRecord"].includes(item.entityType)) {
             db.prepare(`UPDATE ${item.entityType} SET supersededAt=? WHERE id=? AND supersededAt IS NULL`).run(now, item.id);
           }
         }

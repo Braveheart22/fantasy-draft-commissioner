@@ -18,6 +18,8 @@ import { CorrectionService } from "../application/corrections/correction-service
 import { RecoveryService } from "../application/recovery/recovery-service.js";
 import { registerOperationsRoutes } from "../routes/operations/operations-routes.js";
 import { CheckpointService } from "../application/backups/checkpoint-service.js";
+import { ExportService } from "../application/exports/export-service.js";
+import { registerExportRoutes } from "../routes/exports/export-routes.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -65,6 +67,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);
   await registerOperationsRoutes(server, { backup: new BackupCoordinator(databasePath), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), backupDirectory });
+  await registerExportRoutes(server,new ExportService(databasePath,backupDirectory),join(dataDirectory,"exports"));
   await registerBuiltUi(server);
   try {
     await server.listen({ host: LOOPBACK_HOST, port: options.port ?? 4173 });

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./setup.css";
 import { OperationsPanel } from "../operations/operations-panel.jsx";
+import { ExportsPanel } from "../exports/exports-panel.jsx";
 
 const key = () => crypto.randomUUID();
 async function api(path, method = "GET", body) {
@@ -28,6 +29,7 @@ function SetupApp() {
     {seasonId && <section><h2>Auction round 1</h2><p>Team contents remain masked until the round is locked and explicitly revealed.</p><button onClick={() => runAuction(() => api(`/api/auction/${seasonId}/1/open`, "POST"))}>Open round</button>{auction?.teams?.map(team => <button key={team.seasonTeamId} disabled={auction.status !== "BIDDING"} onClick={() => runAuction(async () => { await api(`/api/auction/${seasonId}/1/teams/${team.seasonTeamId}`, "PUT", { bids: [], finalize: true, confirmZero: true }); return api(`/api/auction/${seasonId}/1`); })}>Finalize {team.displayName}: zero bids</button>)}<button disabled={!auction || auction.status !== "BIDDING"} onClick={() => run(async () => { await api(`/api/auction/${seasonId}/1/lock`, "POST", {}); const revealed = await api(`/api/auction/${seasonId}/1?reveal=true`); setAuction(revealed); return revealed; })}>Lock, resolve & reveal</button><button disabled={auction?.status !== "REVIEW"} onClick={() => runAuction(() => api(`/api/auction/${seasonId}/1/publish`, "POST"))}>Publish round</button>{auction && <ul>{auction.teams.map(team => <li key={team.seasonTeamId}>{team.displayName}: {team.status}, {team.bidCount} bid(s){auction.revealed ? " — revealed" : " — masked"}</li>)}</ul>}</section>}
     {seasonId && <section><h2>Permanent conventional draft</h2><button onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/calculate`, "POST"); setDraft(result); return result; })}>Calculate order from Round 2 balances</button>{draft?.order?.length > 0 && <ol>{draft.order.map(team => <li key={team.seasonTeamId}>{team.displayName} — ${team.remainingBalance}</li>)}</ol>}{draft?.ties?.length > 0 && <p>{draft.ties.length} tied balance group(s) require recorded external precedence.</p>}{draft?.currentSeasonTeamId && <><p>Pick {draft.nextOverallPick}: {draft.order.find(team => team.seasonTeamId === draft.currentSeasonTeamId)?.displayName} is on the clock. The same order repeats every round.</p><label>Available player ID <input value={draftPlayerId} onChange={event => setDraftPlayerId(event.target.value)} /></label><button disabled={!draftPlayerId} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/picks`, "POST", { seasonTeamId: draft.currentSeasonTeamId, playerId: draftPlayerId, rosterRules: { limits: { QB: 2, RB: 2, WR: 3, TE: 2, K: 2, DST: 2 }, flexEligible: ["RB", "WR", "TE"], flexCapacity: 1 } }); setDraft(result); setDraftPlayerId(""); return result; })}>Commit legal pick</button></>}</section>}
     <OperationsPanel seasonId={seasonId || undefined} />
+    <ExportsPanel seasonId={seasonId || undefined} />
   </main>;
 }
 createRoot(document.getElementById("root")).render(<SetupApp />);

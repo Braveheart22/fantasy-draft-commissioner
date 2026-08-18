@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 test("external order tie resolution drives a complete fixed-order draft loop", async ({ request }) => {
   let serial = 0; const seasonId = `draft-e2e-${Date.now()}`; const headers = data => ({ ...(data === undefined ? {} : { "content-type": "application/json" }), "idempotency-key": `draft-${++serial}` });
@@ -12,4 +15,5 @@ test("external order tie resolution drives a complete fixed-order draft loop", a
   for (const round of [1, 2]) { const opened = await send("POST", `/api/auction/${seasonId}/${round}/open`); for (const team of opened.teams) await send("PUT", `/api/auction/${seasonId}/${round}/teams/${team.seasonTeamId}`, { bids: [], finalize: true, confirmZero: true }); expect((await send("POST", `/api/auction/${seasonId}/${round}/lock`, {})).status).toBe("RESOLVED"); await send("POST", `/api/auction/${seasonId}/${round}/publish`); }
   const paused = await send("POST", `/api/draft/${seasonId}/order/calculate`); expect(paused.status).toBe("TIE_PAUSED"); const tie = paused.ties[0]; await send("POST", `/api/draft/${seasonId}/order/ties`, { balance: tie.balance, participantTeamIds: tie.seasonTeamIds, precedenceTeamIds: [...tie.seasonTeamIds].reverse(), method: "external draw", decidedAt: "2026-08-17T00:00:00.000Z" }); const order = await send("POST", `/api/draft/${seasonId}/order/finalize`); expect(order.order).toHaveLength(2);
   for (let round = 0; round < 14; round++) for (let position = 0; position < 2; position++) { const result = await send("POST", `/api/draft/${seasonId}/picks`, { seasonTeamId: order.order[position].seasonTeamId, playerId: `${seasonId}-p${position * 14 + round}`, rosterRules: rules }); if (round === 1 && position === 0) expect(result.currentSeasonTeamId).toBe(order.order[1].seasonTeamId); if (round === 1 && position === 1) expect(result.currentSeasonTeamId).toBe(order.order[0].seasonTeamId); if (round === 13 && position === 1) expect(result.status).toBe("COMPLETED"); }
+  const exported=await send("POST",`/api/exports/${seasonId}`,{destinationDirectory:join(tmpdir(),`commissioner-export-${seasonId}`),rosterRules:rules});expect(exported.backupId).toBeTruthy();expect(JSON.parse(await readFile(exported.jsonPath,"utf8")).rosters).toHaveLength(2);expect(await readFile(exported.csvPath,"utf8")).toContain("acquisition_source");
 });
