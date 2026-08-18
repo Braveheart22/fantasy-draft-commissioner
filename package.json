@@ -5,9 +5,16 @@
   "type": "module",
   "description": "Pure deterministic Phase 1 fantasy football auction allocation engine",
   "exports": "./src/index.js",
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "test": "node --test",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "commissioner:typecheck": "npm run typecheck --workspace @league-draft/commissioner",
+    "commissioner:test": "npm run test --workspace @league-draft/commissioner",
+    "commissioner:build": "npm run build --workspace @league-draft/commissioner",
+    "commissioner:start": "npm run start --workspace @league-draft/commissioner"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.0.1"
