@@ -1,0 +1,3 @@
+import { expect, test } from "@playwright/test";
+
+test("operations UI creates and reports a verified local backup",async({page,request})=>{await page.goto("/");await page.getByRole("button",{name:"Create verified backup"}).click();await expect(page.getByRole("status")).toContainText("Verified backup:");const summary=await request.get("/api/operations/recovery");expect(summary.ok()).toBe(true);expect(await summary.json()).toMatchObject({integrity:"ok",schemaVersion:6,compatible:true});});

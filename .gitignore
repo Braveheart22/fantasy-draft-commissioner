@@ -5,3 +5,7 @@ dist/
 *.sqlite-shm
 *.sqlite-wal
 apps/commissioner/src/generated/
+.package-smoke/
+.package-smoke-data/
+.package-smoke-backup/
+.package-smoke-restore/

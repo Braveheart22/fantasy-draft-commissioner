@@ -9,6 +9,7 @@
     "postinstall": "prisma generate --schema prisma/schema.prisma",
     "start": "node dist/src/server/main.js",
     "restore": "node dist/src/server/restore-main.js",
+    "package:local": "node scripts/package-local.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
