@@ -13,6 +13,11 @@ import { registerAuctionRoutes } from "../routes/auction/auction-routes.js";
 import { DraftOrderService } from "../application/draft-order/draft-order-service.js";
 import { ConventionalDraftService } from "../application/conventional-draft/conventional-draft-service.js";
 import { registerDraftRoutes } from "../routes/draft/draft-routes.js";
+import { BackupCoordinator } from "../infrastructure/files/backup-coordinator.js";
+import { CorrectionService } from "../application/corrections/correction-service.js";
+import { RecoveryService } from "../application/recovery/recovery-service.js";
+import { registerOperationsRoutes } from "../routes/operations/operations-routes.js";
+import { CheckpointService } from "../application/backups/checkpoint-service.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -47,15 +52,19 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const dataDirectory = options.dataDirectory ?? resolveDataDirectory();
   await mkdir(dataDirectory, { recursive: true });
   const server = Fastify({ logger: false });
-  const store = await openSeasonStore(join(dataDirectory, "commissioner.db"));
-  const setup = new SetupService(store, store);
-  const auction = new AuctionService(store, auctionEngineAdapter);
-  const order = new DraftOrderService(store);
-  const draft = new ConventionalDraftService(store);
+  const databasePath = join(dataDirectory, "commissioner.db");
+  const store = await openSeasonStore(databasePath);
+  const backupDirectory = join(dataDirectory, "backups");
+  const checkpoints = new CheckpointService(databasePath, backupDirectory);
+  const setup = new SetupService(store, store, checkpoints);
+  const auction = new AuctionService(store, auctionEngineAdapter, checkpoints);
+  const order = new DraftOrderService(store, checkpoints);
+  const draft = new ConventionalDraftService(store, checkpoints);
   server.get("/health", async () => ({ status: "ok", dataDirectory }));
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);
+  await registerOperationsRoutes(server, { backup: new BackupCoordinator(databasePath), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), backupDirectory });
   await registerBuiltUi(server);
   try {
     await server.listen({ host: LOOPBACK_HOST, port: options.port ?? 4173 });

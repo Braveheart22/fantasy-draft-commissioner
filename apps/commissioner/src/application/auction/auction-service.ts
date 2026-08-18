@@ -1,9 +1,10 @@
 import type { AuctionEnginePort, CommissionerAuctionInput } from "../ports/auction-engine.js";
 import type { ActorDescriptor, CommandMetadata } from "../ports/season-repository.js";
 import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, TieDecisionInput } from "./auction-repository.js";
+import type { CheckpointPort } from "../backups/checkpoint-service.js";
 
 export class AuctionService {
-  constructor(private readonly repository: AuctionRepository, private readonly engine: AuctionEnginePort) {}
+  constructor(private readonly repository: AuctionRepository, private readonly engine: AuctionEnginePort, private readonly checkpoints?: CheckpointPort) {}
   open(metadata: CommandMetadata, round: AuctionRoundNumber) { return this.repository.openRound(metadata, round); }
   submit(metadata: CommandMetadata, round: AuctionRoundNumber, teamId: string, bids: AuctionBidDraft[], options: { finalize?: boolean; confirmZero?: boolean } = {}) {
     if (bids.length > 3) throw new Error("A submission may contain zero to three bids");
@@ -12,6 +13,7 @@ export class AuctionService {
     return this.repository.saveSubmission(metadata, round, teamId, bids, Boolean(options.finalize), Boolean(options.confirmZero));
   }
   async lockAndResolve(metadata: CommandMetadata, round: AuctionRoundNumber, rosterRules: CommissionerAuctionInput["rosterRules"]) {
+    await this.checkpoints?.before(metadata, `PRE_AUCTION_R${round}_LOCK`);
     const input = await this.repository.lockRound(metadata, round, rosterRules);
     return this.resolve(metadata, round, input);
   }
@@ -24,7 +26,7 @@ export class AuctionService {
     await this.repository.recordAttempt({ ...metadata, commandType: "RESOLVE_AUCTION_ROUND", idempotencyKey: `${metadata.idempotencyKey}:engine-attempt` }, round, input, result);
     return result;
   }
-  publish(metadata: CommandMetadata, round: AuctionRoundNumber) { return this.repository.publish(metadata, round); }
+  async publish(metadata: CommandMetadata, round: AuctionRoundNumber) { await this.checkpoints?.before(metadata, `PRE_AUCTION_R${round}_PUBLICATION`); return this.repository.publish(metadata, round); }
   reopen(metadata: CommandMetadata, round: AuctionRoundNumber) { return this.repository.reopen(metadata, round); }
   summary(actor: ActorDescriptor, seasonId: string, round: AuctionRoundNumber, reveal = false) { return this.repository.summary(actor, seasonId, round, reveal); }
 }

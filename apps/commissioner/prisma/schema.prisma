@@ -41,6 +41,7 @@ model Season {
   keepers KeeperSelection[]
   auctionRounds AuctionRound[]
   conventionalDraft ConventionalDraft?
+  correctionActions CorrectionAction[]
   @@unique([leagueId, year])
 }
 model Team {
@@ -87,6 +88,7 @@ model DraftOrderEntry {
   seasonTeamId String
   seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
   remainingBalance Int
+  supersededAt DateTime?
   @@unique([conventionalDraftId, orderPosition])
   @@unique([conventionalDraftId, seasonTeamId])
 }
@@ -100,6 +102,7 @@ model DraftOrderTieDecision {
   method String
   note String?
   decidedAt DateTime
+  supersededAt DateTime?
   @@unique([conventionalDraftId, balance])
 }
 model DraftPick {
@@ -169,6 +172,7 @@ model KeeperSelection {
   cost Int @default(50)
   startingBudget Int
   createdAt DateTime @default(now())
+  supersededAt DateTime?
 }
 model AuctionRound {
   id String @id
@@ -239,6 +243,7 @@ model AuctionAward {
   amount Int
   bidId String
   sourceAttemptId String
+  supersededAt DateTime?
   @@unique([roundId, playerId])
 }
 model TeamAuctionBalance {
@@ -249,6 +254,7 @@ model TeamAuctionBalance {
   startingBudget Int
   spent Int
   remainingBudget Int
+  supersededAt DateTime?
   @@unique([seasonId, seasonTeamId, roundNumber])
 }
 model RosterAssignment {
@@ -310,4 +316,39 @@ model Checkpoint {
   sourceAuditEvent AuditEvent @relation(fields: [sourceAuditEventId], references: [id])
   createdAt DateTime @default(now())
   supersededAt DateTime?
+}
+
+model BackupRecord {
+  id String @id
+  seasonId String?
+  path String
+  manifestPath String
+  sha256 String
+  schemaVersion Int
+  applicationVersion String
+  trigger String
+  seasonVersion Int?
+  dependencyCutHash String?
+  verifiedAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model CorrectionAction {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  correctionType String
+  targetId String?
+  requestedAuditEventId String?
+  rollbackCheckpointId String?
+  seasonVersion Int
+  dependencyCutHash String
+  impactJson String
+  backupHash String?
+  reason String?
+  confirmedAt DateTime?
+  resultAuditEventId String?
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([seasonId, createdAt])
 }

@@ -15,7 +15,8 @@
     "commissioner:test": "npm run test --workspace @league-draft/commissioner",
     "commissioner:e2e": "npm run e2e --workspace @league-draft/commissioner",
     "commissioner:build": "npm run build --workspace @league-draft/commissioner",
-    "commissioner:start": "npm run start --workspace @league-draft/commissioner"
+    "commissioner:start": "npm run start --workspace @league-draft/commissioner",
+    "commissioner:restore": "npm run restore --workspace @league-draft/commissioner --"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.0.1"

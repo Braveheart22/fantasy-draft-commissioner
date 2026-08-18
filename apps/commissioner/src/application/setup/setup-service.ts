@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { CommandMetadata, SeasonRepository } from "../ports/season-repository.js";
 import type { ImportPreview, PlayerInput, SetupRepository, TeamInput } from "./setup-repository.js";
+import type { CheckpointPort } from "../backups/checkpoint-service.js";
 
 export class SetupService {
-  constructor(private readonly seasons: SeasonRepository, private readonly setup: SetupRepository) {}
+  constructor(private readonly seasons: SeasonRepository, private readonly setup: SetupRepository, private readonly checkpoints?: CheckpointPort) {}
 
   createSeason(metadata: CommandMetadata, input: { leagueId: string; year: number; name: string; teamCount: number; seasonId?: string }) {
     if (!Number.isInteger(input.teamCount) || input.teamCount < 1) throw new Error("Team count must be a positive integer");
@@ -18,6 +19,6 @@ export class SetupService {
   setPriceFloors(metadata: CommandMetadata, floors: Record<string, number>) { return this.setup.setPriceFloors(metadata, floors); }
   setKeeperEligibility(metadata: CommandMetadata, playerIds: string[]) { return this.setup.setKeeperEligibility(metadata, playerIds); }
   selectKeeper(metadata: CommandMetadata, seasonTeamId: string, playerId?: string) { return this.setup.selectKeeper(metadata, seasonTeamId, playerId); }
-  lockKeepers(metadata: CommandMetadata, rosterCapacity: number) { return this.setup.lockKeepers(metadata, rosterCapacity); }
+  async lockKeepers(metadata: CommandMetadata, rosterCapacity: number) { await this.checkpoints?.before(metadata, "PRE_KEEPER_LOCK"); return this.setup.lockKeepers(metadata, rosterCapacity); }
   summary(metadata: Pick<CommandMetadata, "actor" | "seasonId">) { return this.setup.setupSummary(metadata.actor, metadata.seasonId); }
 }

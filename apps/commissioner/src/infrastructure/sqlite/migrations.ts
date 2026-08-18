@@ -6,12 +6,13 @@ import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { openDurableDatabase } from "../../server/sqlite-maintenance.js";
 
-const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 const migrationPaths = [
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170001_u2_persistence/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170002_u3_setup/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170003_u4_auction/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170004_u5_draft/migration.sql"),
+  join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170005_u6_recovery/migration.sql"),
 ];
 
 function schemaVersion(database: Database.Database): number | undefined {
@@ -28,11 +29,17 @@ export function applyMigrations(database: Database.Database): void {
   } else if (version === 1) {
     database.exec(readFileSync(migrationPaths[1]!, "utf8"));
     database.exec(readFileSync(migrationPaths[2]!, "utf8"));
+    database.exec(readFileSync(migrationPaths[3]!, "utf8"));
+    database.exec(readFileSync(migrationPaths[4]!, "utf8"));
   } else if (version === 2) {
     database.exec(readFileSync(migrationPaths[2]!, "utf8"));
     database.exec(readFileSync(migrationPaths[3]!, "utf8"));
+    database.exec(readFileSync(migrationPaths[4]!, "utf8"));
   } else if (version === 3) {
     database.exec(readFileSync(migrationPaths[3]!, "utf8"));
+    database.exec(readFileSync(migrationPaths[4]!, "utf8"));
+  } else if (version === 4) {
+    database.exec(readFileSync(migrationPaths[4]!, "utf8"));
   }
   const integrity = database.pragma("integrity_check", { simple: true });
   if (integrity !== "ok") throw new Error(`SQLite integrity check failed: ${String(integrity)}`);
