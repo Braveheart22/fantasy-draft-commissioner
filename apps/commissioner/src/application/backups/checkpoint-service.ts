@@ -2,6 +2,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import type { CommandMetadata } from "../ports/season-repository.js";
 import { BackupCoordinator } from "../../infrastructure/files/backup-coordinator.js";
+import { recordVerifiedBackup } from "./backup-record.js";
 
 export interface CheckpointPort {
   before(metadata: CommandMetadata, trigger: string): Promise<void>;
@@ -18,7 +19,13 @@ export class CheckpointService implements CheckpointPort {
     });
     const db = new Database(this.databasePath, { fileMustExist: true });
     try {
-      db.prepare("INSERT INTO BackupRecord (id,seasonId,path,manifestPath,sha256,schemaVersion,applicationVersion,trigger,seasonVersion,verifiedAt,createdAt) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").run(receipt.backupId, metadata.seasonId, receipt.path, receipt.manifestPath, receipt.sha256, receipt.manifest.schemaVersion, receipt.manifest.applicationVersion, trigger, metadata.expectedVersion);
+      recordVerifiedBackup(db, receipt, {
+        seasonId: metadata.seasonId,
+        trigger,
+        ...(metadata.expectedVersion !== undefined
+          ? { seasonVersion: metadata.expectedVersion }
+          : {}),
+      });
     } finally { db.close(); }
   }
 }

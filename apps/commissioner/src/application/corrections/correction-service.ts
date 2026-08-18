@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { BackupCoordinator } from "../../infrastructure/files/backup-coordinator.js";
+import { recordVerifiedBackup } from "../backups/backup-record.js";
 import { dependencyCut, resumeState } from "./dependency-registry.js";
 import type { CorrectionPreview, CorrectionType, DependencyItem } from "./correction-types.js";
 
@@ -33,7 +34,12 @@ export class CorrectionService {
     try {
       writer.transaction(() => {
         writer.prepare("INSERT INTO CorrectionAction (id,seasonId,correctionType,targetId,seasonVersion,dependencyCutHash,impactJson,backupHash,createdAt) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(id, seasonId, correctionType, targetId ?? null, seasonVersion, cutHash, JSON.stringify(preview), backup.sha256);
-        writer.prepare("INSERT INTO BackupRecord (id,seasonId,path,manifestPath,sha256,schemaVersion,applicationVersion,trigger,seasonVersion,dependencyCutHash,verifiedAt,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").run(backup.backupId, seasonId, backup.path, backup.manifestPath, backup.sha256, backup.manifest.schemaVersion, backup.manifest.applicationVersion, "PRE_CORRECTION", seasonVersion, cutHash);
+        recordVerifiedBackup(writer, backup, {
+          seasonId,
+          trigger: "PRE_CORRECTION",
+          seasonVersion,
+          dependencyCutHash: cutHash,
+        });
       })();
     } finally { writer.close(); }
     return preview;

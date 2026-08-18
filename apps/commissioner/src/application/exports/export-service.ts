@@ -5,6 +5,7 @@ import type { RosterRules } from "../conventional-draft/conventional-draft-repos
 import { validateRosterThroughPhase1 } from "../../integrations/roster-validator-adapter.js";
 import { BackupCoordinator } from "../../infrastructure/files/backup-coordinator.js";
 import { writeExportBundle } from "../../infrastructure/files/export-writer.js";
+import { recordVerifiedBackup } from "../backups/backup-record.js";
 
 type Row={seasonId:string;year:number;seasonName:string;seasonTeamId:string;teamId:string;teamName:string;seedOrder:number;playerId:string;playerName:string;position:string;sourceType:string;custom:number;acquisitionSource:string;auctionRound:number|null;cost:number|null;overallPick:number|null;draftRound:number|null;orderPosition:number|null};
 const csvCell=(value:unknown)=>{const text=value==null?"":String(value);return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;};
@@ -25,7 +26,7 @@ export class ExportService {
       const headers=["season_id","team_id","team_name","player_id","player_name","position","source_type","custom","acquisition_source","auction_round","cost","overall_pick","draft_round","order_position"];
       const csv=[headers.join(","),...rows.map(row=>[row.seasonId,row.teamId,row.teamName,row.playerId,row.playerName,row.position,row.sourceType,Boolean(row.custom),row.acquisitionSource,row.auctionRound,row.cost,row.overallPick,row.draftRound,row.orderPosition].map(csvCell).join(","))].join("\n")+"\n";
       const written=await writeExportBundle(destinationDirectory,json,csv);
-      const id=randomUUID();db.transaction(()=>{db.prepare("INSERT INTO BackupRecord (id,seasonId,path,manifestPath,sha256,schemaVersion,applicationVersion,trigger,seasonVersion,verifiedAt,createdAt) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").run(backup.backupId,seasonId,backup.path,backup.manifestPath,backup.sha256,backup.manifest.schemaVersion,backup.manifest.applicationVersion,"PRE_EXPORT",version);db.prepare("INSERT INTO ExportRecord(id,seasonId,backupId,jsonPath,jsonSha256,csvPath,csvSha256,schemaVersion,createdAt) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(id,seasonId,backup.backupId,written.jsonPath,written.jsonSha256,written.csvPath,written.csvSha256,1);})();
+      const id=randomUUID();db.transaction(()=>{recordVerifiedBackup(db,backup,{seasonId,trigger:"PRE_EXPORT",seasonVersion:version});db.prepare("INSERT INTO ExportRecord(id,seasonId,backupId,jsonPath,jsonSha256,csvPath,csvSha256,schemaVersion,createdAt) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(id,seasonId,backup.backupId,written.jsonPath,written.jsonSha256,written.csvPath,written.csvSha256,1);})();
       return{id,backupId:backup.backupId,...written};
     }finally{db.close();}
   }
