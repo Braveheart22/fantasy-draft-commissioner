@@ -6,8 +6,11 @@ import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { openDurableDatabase } from "../../server/sqlite-maintenance.js";
 
-const CURRENT_SCHEMA_VERSION = 1;
-const migrationPath = join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170001_u2_persistence/migration.sql");
+const CURRENT_SCHEMA_VERSION = 2;
+const migrationPaths = [
+  join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170001_u2_persistence/migration.sql"),
+  join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170002_u3_setup/migration.sql"),
+];
 
 function schemaVersion(database: Database.Database): number | undefined {
   const exists = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchemaMetadata'").get();
@@ -18,7 +21,11 @@ function schemaVersion(database: Database.Database): number | undefined {
 export function applyMigrations(database: Database.Database): void {
   const version = schemaVersion(database);
   if (version !== undefined && version > CURRENT_SCHEMA_VERSION) throw new Error(`Database has newer schema version ${version}; application supports ${CURRENT_SCHEMA_VERSION}`);
-  if (version === undefined) database.exec(readFileSync(migrationPath, "utf8"));
+  if (version === undefined) {
+    for (const path of migrationPaths) database.exec(readFileSync(path, "utf8"));
+  } else if (version === 1) {
+    database.exec(readFileSync(migrationPaths[1]!, "utf8"));
+  }
   const integrity = database.pragma("integrity_check", { simple: true });
   if (integrity !== "ok") throw new Error(`SQLite integrity check failed: ${String(integrity)}`);
 }

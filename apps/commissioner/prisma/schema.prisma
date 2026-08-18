@@ -35,6 +35,10 @@ model Season {
   auditEvents AuditEvent[]
   snapshots FrozenSnapshot[]
   checkpoints Checkpoint[]
+  players Player[]
+  importBatches PlayerImportBatch[]
+  priceFloors PositionPriceFloor[]
+  keepers KeeperSelection[]
   @@unique([leagueId, year])
 }
 model Team {
@@ -55,6 +59,59 @@ model SeasonTeam {
   active Boolean @default(true)
   @@unique([seasonId, teamId])
   @@unique([seasonId, seedOrder])
+  keeper KeeperSelection?
+}
+model Player {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  name String
+  position String
+  sourceType String
+  sourceNamespace String?
+  externalId String?
+  custom Boolean @default(false)
+  explicitMinimumBid Int?
+  available Boolean @default(true)
+  keeperEligible Boolean @default(false)
+  activeImportBatchId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  keeper KeeperSelection?
+  @@unique([seasonId, sourceType, sourceNamespace, externalId])
+}
+model PlayerImportBatch {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceNamespace String
+  format String
+  sha256 String
+  rowCount Int
+  supersedesId String?
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([seasonId, sourceNamespace, sha256])
+}
+model PositionPriceFloor {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  position String
+  minimumBid Int
+  @@unique([seasonId, position])
+}
+model KeeperSelection {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  seasonTeamId String @unique
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+  playerId String @unique
+  player Player @relation(fields: [playerId], references: [id])
+  cost Int @default(50)
+  startingBudget Int
+  createdAt DateTime @default(now())
 }
 model AuditEvent {
   id String @id

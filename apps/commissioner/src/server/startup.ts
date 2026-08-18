@@ -1,7 +1,12 @@
-import { mkdir } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import { homedir, platform as currentPlatform } from "node:os";
-import { join } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
+import type { FastifyInstance } from "fastify";
+import { SetupService } from "../application/setup/setup-service.js";
+import { openSeasonStore } from "../infrastructure/sqlite/season-store.js";
+import { registerSetupRoutes } from "../routes/setup/setup-routes.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -20,12 +25,34 @@ export interface CommissionerServerOptions {
   dataDirectory?: string;
 }
 
+async function registerBuiltUi(server: FastifyInstance) {
+  const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../ui");
+  try { await access(join(uiRoot, "index.html")); } catch { return; }
+  server.get("/", async (_request, reply) => reply.type("text/html").send(await readFile(join(uiRoot, "index.html"))));
+  server.get<{ Params: { "*": string } }>("/assets/*", async (request, reply) => {
+    const path = resolve(uiRoot, "assets", request.params["*"]);
+    if (!path.startsWith(resolve(uiRoot, "assets") + "\\") && !path.startsWith(resolve(uiRoot, "assets") + "/")) return reply.code(404).send();
+    const contentType = extname(path) === ".css" ? "text/css" : "text/javascript";
+    return reply.type(contentType).send(await readFile(path));
+  });
+}
+
 export async function startCommissionerServer(options: CommissionerServerOptions = {}) {
   const dataDirectory = options.dataDirectory ?? resolveDataDirectory();
   await mkdir(dataDirectory, { recursive: true });
   const server = Fastify({ logger: false });
+  const store = await openSeasonStore(join(dataDirectory, "commissioner.db"));
+  const setup = new SetupService(store, store);
   server.get("/health", async () => ({ status: "ok", dataDirectory }));
-  await server.listen({ host: LOOPBACK_HOST, port: options.port ?? 4173 });
+  await registerSetupRoutes(server, setup);
+  await registerBuiltUi(server);
+  try {
+    await server.listen({ host: LOOPBACK_HOST, port: options.port ?? 4173 });
+  } catch (error) {
+    await server.close();
+    await store.close();
+    throw error;
+  }
   const address = server.server.address();
   if (!address || typeof address === "string") throw new Error("Commissioner server did not expose a TCP address");
   let stopped = false;
@@ -36,6 +63,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
       if (stopped) return;
       stopped = true;
       await server.close();
+      await store.close();
     },
   };
 }

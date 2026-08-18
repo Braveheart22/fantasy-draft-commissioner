@@ -1,0 +1,25 @@
+import React, { useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./setup.css";
+
+const key = () => crypto.randomUUID();
+async function api(path, method = "GET", body) {
+  const response = await fetch(path, { method, headers: { "content-type": "application/json", "idempotency-key": key() }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message ?? "Request failed");
+  return data;
+}
+
+function SetupApp() {
+  const [seasonId, setSeasonId] = useState("");
+  const [summary, setSummary] = useState(null);
+  const [message, setMessage] = useState("Create a season to begin.");
+  const run = async action => { setMessage("Saving…"); try { const result = await action(); if (result?.season) setSummary(result); setMessage("Saved"); } catch (error) { setMessage(error.message); } };
+  return <main><header><p className="eyebrow">Local commissioner console</p><h1>Draft setup</h1><p>{message}</p></header>
+    <section><h2>1. Season</h2><button onClick={() => run(async () => { const id = crypto.randomUUID(); const result = await api("/api/setup/seasons", "POST", { seasonId: id, leagueId: "local-league", year: new Date().getFullYear(), name: "League Draft", teamCount: 2 }); setSeasonId(id); return result; })}>Create two-team season</button></section>
+    <section><h2>2. Teams & catalog</h2><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/teams`, "PUT", { teams: [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }] }))}>Add teams</button><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/custom-players`, "POST", { id: "eddie-gallagher", name: "Eddie Gallagher", position: "K" }))}>Add Eddie Gallagher</button><button disabled={!seasonId} onClick={() => run(async () => { const content = JSON.stringify([{ externalId: "jj-18", name: "Justin Jefferson", position: "WR" }]); const preview = await api(`/api/setup/${seasonId}/imports/preview`, "POST", { namespace: "sample-nfl", content, format: "json" }); if (preview.errors.length || preview.reviews.length) throw new Error("Import needs review"); await api(`/api/setup/${seasonId}/imports`, "POST", { namespace: "sample-nfl", format: "json", preview }); return api(`/api/setup/${seasonId}`); })}>Import sample NFL players</button></section>
+    <section><h2>3. Preflight</h2><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/pricing`, "PUT", { floors: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 } }))}>Set $1 floors</button><button disabled={!summary?.players?.some(player => player.name === "Justin Jefferson")} onClick={() => run(async () => { const playerId = summary.players.find(player => player.name === "Justin Jefferson").id; const teamId = summary.teams.find(team => team.displayName === "Beta").seasonTeamId; await api(`/api/setup/${seasonId}/keeper-eligibility`, "PUT", { playerIds: [playerId] }); return api(`/api/setup/${seasonId}/teams/${teamId}/keeper`, "PUT", { playerId }); })}>Keep Justin Jefferson for Beta</button><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/lock`, "POST", { rosterCapacity: 14 }))}>Lock keepers</button></section>
+    {summary && <section><h2>Budgets</h2><ul>{summary.teams.map(team => <li key={team.id}>{team.displayName}: ${team.startingBudget}</li>)}</ul></section>}
+  </main>;
+}
+createRoot(document.getElementById("root")).render(<SetupApp />);
