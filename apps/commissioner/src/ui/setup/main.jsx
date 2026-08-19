@@ -3,10 +3,15 @@ import { createRoot } from "react-dom/client";
 import "./setup.css";
 import { OperationsPanel } from "../operations/operations-panel.jsx";
 import { ExportsPanel } from "../exports/exports-panel.jsx";
+import { LifecycleState } from "../../application/ports/season-repository.js";
 
 const key = () => crypto.randomUUID();
 let currentSeasonVersion;
 const draftRules = { limits: { QB: 2, RB: 2, WR: 3, TE: 2, K: 2, DST: 2 }, flexEligible: ["RB", "WR", "TE"], flexCapacity: 1 };
+const roundOneAuctionStates = new Set([LifecycleState.R1_BIDDING, LifecycleState.R1_TIE_PAUSED, LifecycleState.R1_REVIEW]);
+const draftStates = new Set([LifecycleState.ORDER_TIE_PAUSED, LifecycleState.ORDER_FINAL, LifecycleState.CONVENTIONAL_DRAFT, LifecycleState.COMPLETED]);
+const roundTwoAuctionStates = new Set([LifecycleState.R2_BIDDING, LifecycleState.R2_TIE_PAUSED, LifecycleState.R2_REVIEW, LifecycleState.R2_PUBLISHED, ...draftStates]);
+const roundTwoViewStates = new Set([LifecycleState.R1_PUBLISHED, ...roundTwoAuctionStates]);
 async function api(path, method = "GET", body) {
   const creating = path === "/api/setup/seasons";
   const response = await fetch(path, { method, headers: { ...(body ? { "content-type": "application/json" } : {}), "idempotency-key": key(), ...(!creating && method !== "GET" && currentSeasonVersion !== undefined ? { "x-expected-season-version": String(currentSeasonVersion) } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -30,13 +35,32 @@ function SetupApp() {
   const [draft, setDraft] = useState(null);
   const [draftPlayerId, setDraftPlayerId] = useState("");
   const run = async action => { setBusy(true); setMessage("Saving…"); try { const result = await action(); if (result?.season) setSummary(result); setMessage("Saved"); return result; } catch (error) { setMessage(error.message); return undefined; } finally { setBusy(false); } };
-  const loadSeason = id => run(async () => { const result = await api(`/api/setup/${id}`); setSeasonId(id); setSeasonInput(id); return result; });
+  const activateSeason = async id => {
+    const result = await api(`/api/setup/${id}`);
+    const state = result.season.state;
+    const nextRound = roundTwoViewStates.has(state) ? 2 : 1;
+    const auctionRound = roundOneAuctionStates.has(state) ? 1 : roundTwoAuctionStates.has(state) ? 2 : undefined;
+    const [nextAuction, nextDraft] = await Promise.all([
+      auctionRound ? api(`/api/auction/${id}/${auctionRound}${state.endsWith("_BIDDING") ? "" : "?reveal=true"}`) : null,
+      draftStates.has(state) ? api(`/api/draft/${id}`) : null,
+    ]);
+    setSeasonId(id);
+    setSeasonInput(id);
+    setRoundNumber(nextRound);
+    setAuction(nextAuction);
+    setBidPlayerId("");
+    setBidAmount("10");
+    setDraft(nextDraft);
+    setDraftPlayerId("");
+    return result;
+  };
+  const loadSeason = id => run(() => activateSeason(id));
   const refreshAuction = async (round = roundNumber, reveal = false) => { const result = await api(`/api/auction/${seasonId}/${round}${reveal ? "?reveal=true" : ""}`); setRoundNumber(round); setAuction(result); return result; };
   const runAuction = action => run(async () => { const result = await action(); if (result?.teams) setAuction(result); return result; });
   const unresolvedTie = auction?.attempts?.at(-1)?.unresolvedTies?.[0];
 
   return <main><header><p className="eyebrow">Local commissioner console</p><h1>Draft setup & sealed auctions</h1><p role="status">{message}</p></header><fieldset disabled={busy}>
-    <section><h2>1. Season</h2><button onClick={() => run(async () => { const id = crypto.randomUUID(); await api("/api/setup/seasons", "POST", { seasonId: id, leagueId: `local-league-${id}`, year: new Date().getFullYear(), name: "League Draft", teamCount: 2 }); setSeasonId(id); setSeasonInput(id); return api(`/api/setup/${id}`); })}>Create two-team season</button><label>Existing season ID <input aria-label="Existing season ID" value={seasonInput} onChange={event => setSeasonInput(event.target.value)} /></label><button disabled={!seasonInput} onClick={() => loadSeason(seasonInput)}>Load season</button></section>
+    <section><h2>1. Season</h2><button onClick={() => run(async () => { const id = crypto.randomUUID(); await api("/api/setup/seasons", "POST", { seasonId: id, leagueId: `local-league-${id}`, year: new Date().getFullYear(), name: "League Draft", teamCount: 2 }); return activateSeason(id); })}>Create two-team season</button><label>Existing season ID <input aria-label="Existing season ID" value={seasonInput} onChange={event => setSeasonInput(event.target.value)} /></label><button disabled={!seasonInput} onClick={() => loadSeason(seasonInput)}>Load season</button></section>
     <section><h2>2. Teams & catalog</h2><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/teams`, "PUT", { teams: [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }] }))}>Add teams</button><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/custom-players`, "POST", { id: "eddie-gallagher", name: "Eddie Gallagher", position: "K" }))}>Add Eddie Gallagher</button><button disabled={!seasonId} onClick={() => run(async () => { const content = JSON.stringify([{ externalId: "jj-18", name: "Justin Jefferson", position: "WR" }]); const preview = await api(`/api/setup/${seasonId}/imports/preview`, "POST", { namespace: "sample-nfl", content, format: "json" }); if (preview.errors.length || preview.reviews.length) throw new Error("Import needs review"); await api(`/api/setup/${seasonId}/imports`, "POST", { namespace: "sample-nfl", format: "json", preview }); return api(`/api/setup/${seasonId}`); })}>Import sample NFL players</button></section>
     <section><h2>3. Preflight</h2><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/pricing`, "PUT", { floors: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 } }))}>Set $1 floors</button><button disabled={!summary?.players?.some(player => player.name === "Justin Jefferson")} onClick={() => run(async () => { const playerId = summary.players.find(player => player.name === "Justin Jefferson").id; const teamId = summary.teams.find(team => team.displayName === "Beta").seasonTeamId; await api(`/api/setup/${seasonId}/keeper-eligibility`, "PUT", { playerIds: [playerId] }); return api(`/api/setup/${seasonId}/teams/${teamId}/keeper`, "PUT", { playerId }); })}>Keep Justin Jefferson for Beta</button><button disabled={!seasonId} onClick={() => run(() => api(`/api/setup/${seasonId}/lock`, "POST", { rosterCapacity: 14 }))}>Lock keepers</button></section>
     {summary && <section><h2>Budgets</h2><ul>{summary.teams.map(team => <li key={team.id}>{team.displayName}: ${team.startingBudget}</li>)}</ul></section>}
@@ -45,8 +69,10 @@ function SetupApp() {
       {unresolvedTie && <button onClick={() => runAuction(async () => { await api(`/api/auction/${seasonId}/${roundNumber}/ties`, "POST", { tieKey: unresolvedTie.key, playerId: unresolvedTie.playerId, amount: unresolvedTie.amount, participantTeamIds: unresolvedTie.teamIds, preferredTeamId: unresolvedTie.teamIds[0], method: "commissioner-recorded external draw", note: "Recorded in local console", decidedAt: new Date().toISOString() }); return refreshAuction(roundNumber, true); })}>Record external tie winner: {unresolvedTie.teamIds[0]}</button>}
       <button disabled={auction?.status !== "REVIEW"} onClick={() => runAuction(async () => { const result = await api(`/api/auction/${seasonId}/${roundNumber}/publish`, "POST"); if (roundNumber === 1) { setRoundNumber(2); setAuction(null); } return result; })}>Publish round {roundNumber}</button>{auction && <ul>{auction.teams.map(team => <li key={team.seasonTeamId}>{team.displayName}: {team.status}, {team.bidCount} bid(s){auction.revealed ? " — revealed" : " — masked"}</li>)}</ul>}</section>}
     {seasonId && <section><h2>Permanent conventional draft</h2><button onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/calculate`, "POST"); setDraft(result); return result; })}>Calculate order from Round 2 balances</button>{draft?.ties?.map(tie => <button key={tie.balance} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/ties`, "POST", { balance: tie.balance, participantTeamIds: tie.seasonTeamIds, precedenceTeamIds: [...tie.seasonTeamIds].reverse(), method: "commissioner-recorded external draw", decidedAt: new Date().toISOString() }); setDraft(result); return result; })}>Record external order tie at ${tie.balance}</button>)}<button disabled={!draft || draft.status !== "TIE_PAUSED" || draft.ties.length > 0} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/finalize`, "POST"); setDraft(result); return result; })}>Finalize permanent order</button>{draft?.order?.length > 0 && <ol>{draft.order.map(team => <li key={team.seasonTeamId}>{team.displayName} — ${team.remainingBalance}</li>)}</ol>}{draft?.currentSeasonTeamId && <><p>Pick {draft.nextOverallPick}: {draft.order.find(team => team.seasonTeamId === draft.currentSeasonTeamId)?.displayName} is on the clock. The same order repeats every round.</p><label>Available player ID <input aria-label="Available player ID" value={draftPlayerId} onChange={event => setDraftPlayerId(event.target.value)} /></label><button disabled={!draftPlayerId} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/picks`, "POST", { seasonTeamId: draft.currentSeasonTeamId, playerId: draftPlayerId, rosterRules: draftRules }); setDraft(result); setDraftPlayerId(""); return result; })}>Commit legal pick</button></>}</section>}
-    <OperationsPanel seasonId={seasonId || undefined} seasonVersion={() => currentSeasonVersion} onChanged={() => { if (seasonId) loadSeason(seasonId); }} />
-    <ExportsPanel seasonId={seasonId || undefined} seasonVersion={() => currentSeasonVersion} /></fieldset>
+    <React.Fragment key={`season-tools-${seasonId}`}>
+      <OperationsPanel seasonId={seasonId || undefined} seasonVersion={() => currentSeasonVersion} onChanged={() => { if (seasonId) loadSeason(seasonId); }} />
+      <ExportsPanel seasonId={seasonId || undefined} seasonVersion={() => currentSeasonVersion} />
+    </React.Fragment></fieldset>
   </main>;
 }
 createRoot(document.getElementById("root")).render(<SetupApp />);

@@ -93,3 +93,30 @@ test("commissioner UI records an auction tie and confirms an audited correction"
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await expect(page.getByText(/Restore is intentionally unavailable/)).toBeVisible();
 });
+
+test("loading another season replaces advanced auction and draft UI state", async ({ page, request }) => {
+  const currentSeasonId = `ui-current-${Date.now()}`;
+  const advancedSeasonId = `ui-advanced-${Date.now()}`;
+  const current = await seedLockedSeason(request, currentSeasonId, 1);
+  await current("POST", `/api/auction/${currentSeasonId}/1/open`);
+  await seedLockedSeason(request, advancedSeasonId, 1);
+
+  await load(page, advancedSeasonId);
+  await zeroBidRound(page, 1);
+  await zeroBidRound(page, 2);
+  await act(page, page.getByRole("button", { name: "Calculate order from Round 2 balances" }));
+  await act(page, page.getByRole("button", { name: /Record external order tie/ }));
+  await act(page, page.getByRole("button", { name: "Finalize permanent order" }));
+  await expect(page.getByText("Pick 1:", { exact: false })).toBeVisible();
+  await page.getByLabel("Bid player ID").fill(`${advancedSeasonId}-stale-bid`);
+  await page.getByLabel("Available player ID").fill(`${advancedSeasonId}-stale-pick`);
+
+  await page.getByLabel("Existing season ID").fill(currentSeasonId);
+  await act(page, page.getByRole("button", { name: "Load season" }));
+
+  await expect(page.getByRole("heading", { name: "Auction round 1" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Auction round 2" })).toHaveCount(0);
+  await expect(page.getByLabel("Bid player ID")).toHaveValue("");
+  await expect(page.getByLabel("Available player ID")).toHaveCount(0);
+  await expect(page.getByText("Pick 1:", { exact: false })).toHaveCount(0);
+});
