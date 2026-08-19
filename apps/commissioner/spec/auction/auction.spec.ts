@@ -13,16 +13,32 @@ let serial = 0; const meta = (seasonId: string, commandType: string) => ({ actor
 const opened: Array<{ store: PrismaSeasonStore; directory: string }> = [];
 afterEach(async () => { while (opened.length) { const item = opened.pop()!; await item.store.close(); await rm(item.directory, { recursive: true, force: true }); } });
 
-async function fixture() {
+async function fixture(options: { withKeeper?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "commissioner-u4-")); const store = await openSeasonStore(join(directory, "draft.db")); opened.push({ store, directory }); const setup = new SetupService(store, store); const seasonId = `season-${serial}`;
   await setup.createSeason(meta(seasonId, "CREATE"), { seasonId, leagueId: `league-${serial}`, year: 2026, name: "Test", teamCount: 2 });
   await setup.configureTeams(meta(seasonId, "TEAMS"), [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }]);
   await setup.addCustomPlayer(meta(seasonId, "PLAYER1"), { id: "p1", name: "One", position: "K", sourceType: "LEAGUE_CUSTOM" }); await setup.addCustomPlayer(meta(seasonId, "PLAYER2"), { id: "p2", name: "Two", position: "K", sourceType: "LEAGUE_CUSTOM" });
-  await setup.setPriceFloors(meta(seasonId, "FLOORS"), { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 }); await setup.lockKeepers(meta(seasonId, "LOCK_KEEPERS"), 14);
+  await setup.setPriceFloors(meta(seasonId, "FLOORS"), { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 });
+  if (options.withKeeper) {
+    const summary = await setup.summary({ actor, seasonId });
+    await setup.setKeeperEligibility(meta(seasonId, "KEEPER_ELIGIBILITY"), ["p1"]);
+    await setup.selectKeeper(meta(seasonId, "KEEPER_SELECTION"), summary.teams[1]!.seasonTeamId, "p1");
+  }
+  await setup.lockKeepers(meta(seasonId, "LOCK_KEEPERS"), 14);
   return { store, seasonId, auction: new AuctionService(store, auctionEngineAdapter) };
 }
 
 describe("auction orchestration", () => {
+  it("includes a selected keeper exactly once when resolving an all-zero round", async () => {
+    const { store, seasonId, auction } = await fixture({ withKeeper: true });
+    const openedRound = await auction.open(meta(seasonId, "OPEN_KEEPER_R1"), 1);
+    for (const team of openedRound.teams) await auction.submit(meta(seasonId, `KEEPER_ZERO_${team.teamId}`), 1, team.seasonTeamId, [], { finalize: true, confirmZero: true });
+
+    await expect(auction.lockAndResolve(meta(seasonId, "LOCK_KEEPER_R1"), 1, rules)).resolves.toMatchObject({ status: "RESOLVED" });
+    const input = await store.frozenInput(actor, seasonId, 1);
+    expect(input.teams.find(team => team.teamId === "beta")?.startingPlayerIds).toEqual(["p1"]);
+  });
+
   it("masks submissions, requires all-team finalization, reveals after lock, publishes atomically, and derives round-two budgets", async () => {
     const { store, seasonId, auction } = await fixture(); const openedRound = await auction.open(meta(seasonId, "OPEN_R1"), 1); const [alpha, beta] = openedRound.teams;
     await auction.submit(meta(seasonId, "A_BIDS"), 1, alpha!.seasonTeamId, [{ playerId: "p1", amount: 20 }], { finalize: true });
