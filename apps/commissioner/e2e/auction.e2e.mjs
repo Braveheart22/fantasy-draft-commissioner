@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test("both auction rounds lock, reveal, resolve forced tie, resume, publish, and derive Round 2 budgets", async ({ request }) => {
-  let serial = 0; const seasonId = `auction-e2e-${Date.now()}`; const headers = data => ({ ...(data === undefined ? {} : { "content-type": "application/json" }), "idempotency-key": `e2e-${++serial}` });
-  const send = async (method, path, data) => { const response = await request.fetch(path, { method, headers: headers(data), ...(data === undefined ? {} : { data }) }); expect(response.ok(), `${method} ${path}: ${await response.text()}`).toBeTruthy(); return response.json(); };
+  let serial = 0; let version; const seasonId = `auction-e2e-${Date.now()}`; const headers = (data,method,path) => ({ ...(data === undefined ? {} : { "content-type": "application/json" }), "idempotency-key": `e2e-${++serial}`, ...(version!==undefined&&method!=="GET"&&path!=="/api/setup/seasons"?{"x-expected-season-version":String(version)}:{}) });
+  const send = async (method, path, data) => { const response = await request.fetch(path, { method, headers: headers(data,method,path), ...(data === undefined ? {} : { data }) }); expect(response.ok(), `${method} ${path}: ${await response.text()}`).toBeTruthy(); const result=await response.json();if(result?.season?.rowVersion!==undefined)version=result.season.rowVersion;else if(result?.rowVersion!==undefined)version=result.rowVersion;else if(method!=="GET"){const summary=await request.get(`/api/setup/${seasonId}`);version=(await summary.json()).season.rowVersion;}return result; };
   await send("POST", "/api/setup/seasons", { seasonId, leagueId: `league-${seasonId}`, year: 2026, name: "Auction proof", teamCount: 2 });
   await send("PUT", `/api/setup/${seasonId}/teams`, { teams: [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }] });
   await send("POST", `/api/setup/${seasonId}/custom-players`, { id: `${seasonId}-p1`, name: "Tie Kicker", position: "K" });

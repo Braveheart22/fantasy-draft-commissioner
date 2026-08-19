@@ -4,6 +4,7 @@ import type { ActorDescriptor, CommandMetadata } from "../ports/season-repositor
 export type AuctionRoundNumber = 1 | 2;
 export interface AuctionBidDraft { playerId: string; amount: number }
 export interface AuctionRoundSummary {
+  rowVersion?: number;
   roundId: string; roundNumber: AuctionRoundNumber; status: string; revealed: boolean;
   teams: Array<{ seasonTeamId: string; teamId: string; displayName: string; status: string; bidCount: number; bids?: Array<{ bidId: string; priority: 1 | 2 | 3; playerId: string; amount: number }> }>;
   attempts: Array<{ attemptNumber: number; status: string; inputHash: string; outputHash: string; unresolvedTies: AuctionEngineResult["unresolvedTies"] }>;
@@ -11,6 +12,7 @@ export interface AuctionRoundSummary {
 }
 export interface TieDecisionInput { tieKey: string; playerId: string; amount: number; participantTeamIds: string[]; preferredTeamId: string; method: string; note?: string; decidedAt: string }
 export interface AuctionRepository {
+  seasonVersion(seasonId: string): Promise<number>;
   openRound(metadata: CommandMetadata, round: AuctionRoundNumber): Promise<AuctionRoundSummary>;
   saveSubmission(metadata: CommandMetadata, round: AuctionRoundNumber, seasonTeamId: string, bids: AuctionBidDraft[], finalize: boolean, confirmZero: boolean): Promise<void>;
   lockRound(metadata: CommandMetadata, round: AuctionRoundNumber, rosterRules: CommissionerAuctionInput["rosterRules"]): Promise<CommissionerAuctionInput>;

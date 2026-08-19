@@ -22,6 +22,12 @@ function schemaVersion(database: Database.Database): number | undefined {
   return Number((database.prepare("SELECT version FROM SchemaMetadata WHERE singleton=1").get() as { version: number }).version);
 }
 
+export function databaseNeedsMigration(path: string): boolean {
+  const database = openDurableDatabase(path);
+  try { const version = schemaVersion(database); if (version !== undefined && version > CURRENT_SCHEMA_VERSION) throw new Error(`Database has newer schema version ${version}`); return version !== undefined && version < CURRENT_SCHEMA_VERSION; }
+  finally { database.close(); }
+}
+
 export function applyMigrations(database: Database.Database): void {
   const version = schemaVersion(database);
   if (version !== undefined && version > CURRENT_SCHEMA_VERSION) throw new Error(`Database has newer schema version ${version}; application supports ${CURRENT_SCHEMA_VERSION}`);

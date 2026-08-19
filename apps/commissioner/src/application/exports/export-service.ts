@@ -1,20 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import Database from "better-sqlite3";
 import type { RosterRules } from "../conventional-draft/conventional-draft-repository.js";
 import { validateRosterThroughPhase1 } from "../../integrations/roster-validator-adapter.js";
 import { BackupCoordinator } from "../../infrastructure/files/backup-coordinator.js";
 import { writeExportBundle } from "../../infrastructure/files/export-writer.js";
 import { recordVerifiedBackup } from "../backups/backup-record.js";
+import type { CommandMetadata } from "../ports/season-repository.js";
 
 type Row={seasonId:string;year:number;seasonName:string;seasonTeamId:string;teamId:string;teamName:string;seedOrder:number;playerId:string;playerName:string;position:string;sourceType:string;custom:number;acquisitionSource:string;auctionRound:number|null;cost:number|null;overallPick:number|null;draftRound:number|null;orderPosition:number|null};
 const csvCell=(value:unknown)=>{const text=value==null?"":String(value);return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;};
 
 export class ExportService {
   constructor(private readonly databasePath:string,private readonly backupDirectory:string,private readonly backups=new BackupCoordinator(databasePath)){}
-  async export(seasonId:string,destinationDirectory:string,rules:RosterRules){
+  async export(seasonId:string,destinationDirectory:string,rules:RosterRules,metadata?:CommandMetadata){
     const probe=new Database(this.databasePath,{readonly:true,fileMustExist:true});let version:number;
-    try{const season=probe.prepare("SELECT state,rowVersion FROM Season WHERE id=?").get(seasonId)as{state:string;rowVersion:number}|undefined;if(!season)throw new Error("Season not found");if(season.state!=="COMPLETED")throw new Error("Season must be complete before export");version=season.rowVersion;}finally{probe.close();}
+    try{if(metadata){const duplicate=probe.prepare("SELECT resultJson FROM AuditEvent WHERE seasonId=? AND actorType=? AND idempotencyKey=?").get(seasonId,metadata.actor.type,metadata.idempotencyKey)as{resultJson:string}|undefined;if(duplicate)return JSON.parse(duplicate.resultJson);}const season=probe.prepare("SELECT state,rowVersion FROM Season WHERE id=?").get(seasonId)as{state:string;rowVersion:number}|undefined;if(!season)throw new Error("Season not found");if(season.state!=="COMPLETED")throw new Error("Season must be complete before export");version=season.rowVersion;if(metadata?.expectedVersion!==undefined&&metadata.expectedVersion!==version)throw new Error("Stale season version");}finally{probe.close();}
     const backup=await this.backups.create(join(this.backupDirectory,seasonId),{seasonId,seasonVersion:version,trigger:"PRE_EXPORT"});
     const db=new Database(this.databasePath,{fileMustExist:true});
     try{
@@ -26,8 +28,9 @@ export class ExportService {
       const headers=["season_id","team_id","team_name","player_id","player_name","position","source_type","custom","acquisition_source","auction_round","cost","overall_pick","draft_round","order_position"];
       const csv=[headers.join(","),...rows.map(row=>[row.seasonId,row.teamId,row.teamName,row.playerId,row.playerName,row.position,row.sourceType,Boolean(row.custom),row.acquisitionSource,row.auctionRound,row.cost,row.overallPick,row.draftRound,row.orderPosition].map(csvCell).join(","))].join("\n")+"\n";
       const written=await writeExportBundle(destinationDirectory,json,csv);
-      const id=randomUUID();db.transaction(()=>{recordVerifiedBackup(db,backup,{seasonId,trigger:"PRE_EXPORT",seasonVersion:version});db.prepare("INSERT INTO ExportRecord(id,seasonId,backupId,jsonPath,jsonSha256,csvPath,csvSha256,schemaVersion,createdAt) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(id,seasonId,backup.backupId,written.jsonPath,written.jsonSha256,written.csvPath,written.csvSha256,1);})();
-      return{id,backupId:backup.backupId,...written};
+      const id=randomUUID();const result={id,backupId:backup.backupId,...written};
+      try{db.transaction(()=>{const current=db.prepare("SELECT rowVersion,state FROM Season WHERE id=?").get(seasonId)as{rowVersion:number;state:string};if(current.rowVersion!==version||current.state!=="COMPLETED")throw new Error("Season changed during export; generated files were discarded");recordVerifiedBackup(db,backup,{seasonId,trigger:"PRE_EXPORT",seasonVersion:version});db.prepare("INSERT INTO ExportRecord(id,seasonId,backupId,jsonPath,jsonSha256,csvPath,csvSha256,schemaVersion,createdAt) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(id,seasonId,backup.backupId,written.jsonPath,written.jsonSha256,written.csvPath,written.csvSha256,1);if(metadata){const sequence=Number((db.prepare("SELECT COALESCE(MAX(sequence),0) value FROM AuditEvent WHERE seasonId=?").get(seasonId)as{value:number}).value)+1;db.prepare("INSERT INTO AuditEvent(id,seasonId,sequence,actorType,actorLabel,commandType,correlationId,idempotencyKey,beforeJson,afterJson,resultJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(randomUUID(),seasonId,sequence,metadata.actor.type,metadata.actor.label,metadata.commandType,metadata.correlationId??randomUUID(),metadata.idempotencyKey,JSON.stringify({seasonVersion:version}),JSON.stringify({exportId:id}),JSON.stringify(result));}})();}catch(error){await Promise.all([rm(written.jsonPath,{force:true}),rm(written.csvPath,{force:true})]);throw error;}
+      return result;
     }finally{db.close();}
   }
 }

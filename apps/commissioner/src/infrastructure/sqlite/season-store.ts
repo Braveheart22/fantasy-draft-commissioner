@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { assertLifecycleTransition } from "../../application/commands/lifecycle.js";
 import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRoundSummary, TieDecisionInput } from "../../application/auction/auction-repository.js";
@@ -10,7 +11,7 @@ import type { DraftOrderDecision, DraftOrderRepository, DraftOrderSummary } from
 import type { ConventionalDraftRepository, DraftPickInput } from "../../application/conventional-draft/conventional-draft-repository.js";
 import { canAddPlayerThroughPhase1, validateRosterThroughPhase1 } from "../../integrations/roster-validator-adapter.js";
 import { PrismaClient } from "../../generated/prisma/client.js";
-import { migrateDatabaseInPlace } from "./migrations.js";
+import { databaseNeedsMigration, migrateDatabaseCopySafely, migrateDatabaseInPlace } from "./migrations.js";
 export { migrateDatabaseCopySafely } from "./migrations.js";
 
 function mapSeason(row: { id: string; leagueId: string; year: number; name: string; state: string; teamCount: number; rowVersion: number; active: boolean }): SeasonRecord {
@@ -50,6 +51,7 @@ function groupBalances<T extends { remainingBudget: number }>(items: T[]): Map<n
 export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
+  async seasonVersion(seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
 
   execute<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T> {
     const run = this.queue.then(() => this.executeNow(metadata, operation));
@@ -271,6 +273,10 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const snapshotId = randomUUID();
       await database.frozenSnapshot.create({ data: { id: snapshotId, seasonId: metadata.seasonId, kind: "KEEPER_LOCK", schemaVersion: 1, payloadJson, sha256: createHash("sha256").update(payloadJson).digest("hex"), sourceAuditEventId: auditId } });
       await database.checkpoint.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, kind: "KEEPER_LOCK", seasonVersion: summary.season.rowVersion + 1, stateSnapshotId: snapshotId, sourceAuditEventId: auditId } });
+      for (const team of summary.teams) if (team.keeperPlayerId) {
+        const keeper = await database.keeperSelection.findUniqueOrThrow({ where: { seasonTeamId: team.seasonTeamId } });
+        await database.rosterAssignment.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, seasonTeamId: team.seasonTeamId, playerId: team.keeperPlayerId, acquisitionSource: "KEEPER", cost: 50, sourceEntityId: keeper.id } });
+      }
       await database.player.updateMany({ where: { seasonId: metadata.seasonId, keeper: { isNot: null } }, data: { available: false } });
       await database.season.update({ where: { id: metadata.seasonId }, data: { state: LifecycleState.KEEPERS_LOCKED, rowVersion: { increment: 1 } } });
     });
@@ -376,6 +382,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       if (!tie || tie.playerId !== decision.playerId || tie.amount !== decision.amount || JSON.stringify([...tie.teamIds].sort()) !== JSON.stringify([...decision.participantTeamIds].sort()) || !tie.teamIds.includes(decision.preferredTeamId)) throw new Error("Tie decision does not match an unresolved tie");
       if (!decision.method.trim() || !decision.decidedAt) throw new Error("External method and timestamp are required");
       await database.auctionTieDecision.create({ data: { id: randomUUID(), roundId: round.id, tieKey: decision.tieKey, playerId: decision.playerId, amount: decision.amount, participantTeamIdsJson: JSON.stringify(decision.participantTeamIds), preferredTeamId: decision.preferredTeamId, method: decision.method, note: decision.note ?? null, decidedAt: new Date(decision.decidedAt) } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
       const base = await database.frozenSnapshot.findUniqueOrThrow({ where: { id: round.inputSnapshotId! } }); const input = JSON.parse(base.payloadJson) as CommissionerAuctionInput; const decisions = await database.auctionTieDecision.findMany({ where: { roundId: round.id, supersededAt: null }, orderBy: { decidedAt: "asc" } });
       return { ...input, tiePrecedence: decisions.map((d: any) => ({ playerId: d.playerId, amount: d.amount, participantTeamIds: JSON.parse(d.participantTeamIdsJson), preferredTeamId: d.preferredTeamId })) };
     });
@@ -397,14 +404,16 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     await this.setupCommand(metadata, async (database, auditId) => {
       const season = await database.season.findUniqueOrThrow({ where: { id: metadata.seasonId } });
       if (season.state !== LifecycleState.R2_PUBLISHED) throw new Error("Draft order requires committed Round 2 results");
-      if (await database.conventionalDraft.findUnique({ where: { seasonId: metadata.seasonId } })) return;
+      const existingDraft = await database.conventionalDraft.findUnique({ where: { seasonId: metadata.seasonId } });
+      if (existingDraft && existingDraft.status !== "RESET") return;
       const teams = await database.seasonTeam.findMany({ where: { seasonId: metadata.seasonId, active: true } });
       const balances = await database.teamAuctionBalance.findMany({ where: { seasonId: metadata.seasonId, roundNumber: 2 } });
       if (balances.length !== teams.length) throw new Error("Every team requires a committed Round 2 balance");
-      const draftId = randomUUID();
+      const draftId = existingDraft?.id ?? randomUUID();
       const groups = groupBalances(balances);
       const hasTies = [...groups.values()].some(group => group.length > 1);
-      await database.conventionalDraft.create({ data: { id: draftId, seasonId: metadata.seasonId, status: hasTies ? "TIE_PAUSED" : "FINAL", contractVersion: "fixed-order/1" } });
+      if (existingDraft) await database.conventionalDraft.update({ where: { id: draftId }, data: { status: hasTies ? "TIE_PAUSED" : "FINAL", completedAt: null } });
+      else await database.conventionalDraft.create({ data: { id: draftId, seasonId: metadata.seasonId, status: hasTies ? "TIE_PAUSED" : "FINAL", contractVersion: "fixed-order/1" } });
       if (!hasTies) {
         const sorted = [...balances].sort((a, b) => b.remainingBudget - a.remainingBudget);
         for (const [index, balance] of sorted.entries()) await database.draftOrderEntry.create({ data: { id: randomUUID(), conventionalDraftId: draftId, orderPosition: index + 1, seasonTeamId: balance.seasonTeamId, remainingBalance: balance.remainingBudget } });
@@ -478,7 +487,8 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
 }
 
 export async function openSeasonStore(path: string): Promise<PrismaSeasonStore> {
-  migrateDatabaseInPlace(path);
+  if (existsSync(path) && databaseNeedsMigration(path)) await migrateDatabaseCopySafely(path);
+  else migrateDatabaseInPlace(path);
   const adapter = new PrismaBetterSqlite3({ url: path }, { timestampFormat: "iso8601" });
   const prisma = new PrismaClient({ adapter });
   await prisma.$connect();

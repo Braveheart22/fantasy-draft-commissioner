@@ -13,4 +13,4 @@ export function dependencyCut(db: Database.Database, seasonId: string, type: Cor
   }
   return result.sort((a,b)=>a.entityType.localeCompare(b.entityType)||a.order-b.order||a.id.localeCompare(b.id));
 }
-export const resumeState=(type:CorrectionType)=>type==="KEEPER"?"SETUP":type==="ROUND_1"?"R1_BIDDING":type==="ROUND_2"?"R2_BIDDING":type==="DRAFT_ORDER"?"R2_PUBLISHED":type==="AUCTION_REOPEN"?"R1_BIDDING":"CONVENTIONAL_DRAFT";
+export const resumeState=(type:CorrectionType)=>type==="KEEPER"?"SETUP":type==="ROUND_1"?"KEEPERS_LOCKED":type==="ROUND_2"?"R1_PUBLISHED":type==="DRAFT_ORDER"?"R2_PUBLISHED":type==="AUCTION_REOPEN"?"R1_BIDDING":"CONVENTIONAL_DRAFT";

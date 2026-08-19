@@ -66,7 +66,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);
-  await registerOperationsRoutes(server, { backup: new BackupCoordinator(databasePath), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), backupDirectory });
+  await registerOperationsRoutes(server, { backup: new BackupCoordinator(databasePath), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), backupDirectory, databasePath });
   await registerExportRoutes(server,new ExportService(databasePath,backupDirectory),join(dataDirectory,"exports"));
   await registerBuiltUi(server);
   try {

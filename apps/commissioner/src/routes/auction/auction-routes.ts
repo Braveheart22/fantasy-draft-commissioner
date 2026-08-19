@@ -1,11 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { AuctionRoundNumber, TieDecisionInput } from "../../application/auction/auction-repository.js";
 import type { AuctionService } from "../../application/auction/auction-service.js";
-import type { CommandMetadata } from "../../application/ports/season-repository.js";
+import { commandMetadata as metadata, localCommissioner as actor } from "../command-metadata.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
 function round(value: string): AuctionRoundNumber { const result = Number(value); if (result !== 1 && result !== 2) throw new Error("Auction round must be 1 or 2"); return result; }
-function metadata(request: FastifyRequest, seasonId: string, commandType: string): CommandMetadata { const key = request.headers["idempotency-key"]; if (typeof key !== "string" || !key) { const error = new Error("Idempotency-Key header is required") as Error & { statusCode: number }; error.statusCode = 400; throw error; } const reason = request.headers["x-reason"]; return { actor, seasonId, commandType, idempotencyKey: key, ...(typeof reason === "string" ? { reason } : {}) }; }
 const defaultRules = { positionLimits: { QB: 2, RB: 5, WR: 5, TE: 2, K: 1, DST: 1 }, flexEligiblePositions: ["RB", "WR", "TE"], flexCapacity: 1 };
 
 export async function registerAuctionRoutes(server: FastifyInstance, service: AuctionService) {

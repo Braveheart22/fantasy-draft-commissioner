@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
+  workers: 1,
   testDir: "e2e",
   testMatch: "*.e2e.mjs",
   use: { baseURL: "http://127.0.0.1:4173" },
