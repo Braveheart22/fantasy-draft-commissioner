@@ -1,0 +1,390 @@
+{
+  "format": "league-draft-export/v1",
+  "season": {
+    "id": "season-schema-6-completed",
+    "year": 2026,
+    "name": "Released schema-6 season"
+  },
+  "rosters": [
+    {
+      "team": {
+        "seasonTeamId": "b01a275b-0234-4e8b-b0c0-66b67a2576f5",
+        "teamId": "team-alpha",
+        "name": "Alpha",
+        "seedOrder": 1
+      },
+      "players": [
+        {
+          "id": "9b352803-176a-4cea-acf3-14e44ec25719",
+          "name": "A-DST-1",
+          "position": "DST",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 23,
+            "draftRound": 12,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "6266ae2b-e9a6-47f1-a59d-a28c009f60bf",
+          "name": "A-DST-2",
+          "position": "DST",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 25,
+            "draftRound": 13,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "385bb519-fe6f-4744-ae9a-bc05938c5be0",
+          "name": "A-K-1",
+          "position": "K",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 19,
+            "draftRound": 10,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "66208f19-48e3-4310-aaba-baa222c71bb5",
+          "name": "A-K-2",
+          "position": "K",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 21,
+            "draftRound": 11,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "0986a4f8-4dcb-4cf8-8ca2-29c2e6139d38",
+          "name": "A-QB-1",
+          "position": "QB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "AUCTION",
+            "auctionRound": 1,
+            "cost": 60
+          }
+        },
+        {
+          "id": "edf22ca4-0f71-485f-8d00-77e0f8cb9968",
+          "name": "A-QB-2",
+          "position": "QB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 1,
+            "draftRound": 1,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "bcb84a94-f685-42fa-ac4a-20f8862b3888",
+          "name": "A-RB-1",
+          "position": "RB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 3,
+            "draftRound": 2,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "38c6e537-0f6a-4c9a-820a-7789212176e6",
+          "name": "A-RB-2",
+          "position": "RB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 5,
+            "draftRound": 3,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "a715afce-e848-4bde-8be9-7ac5d11c9238",
+          "name": "A-RB-3",
+          "position": "RB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 7,
+            "draftRound": 4,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "1b59f96a-43eb-46bc-941b-a7efa0a291d3",
+          "name": "A-TE-1",
+          "position": "TE",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 15,
+            "draftRound": 8,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "aff4525c-52f4-4f6e-9743-a0d00f2e2cc0",
+          "name": "A-TE-2",
+          "position": "TE",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 17,
+            "draftRound": 9,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "b317e2a2-1d64-4519-9679-55f44179dc39",
+          "name": "A-WR-1",
+          "position": "WR",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 9,
+            "draftRound": 5,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "4e0fdf64-2898-4012-bf5f-9225177bc745",
+          "name": "A-WR-2",
+          "position": "WR",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 11,
+            "draftRound": 6,
+            "orderPosition": 1
+          }
+        },
+        {
+          "id": "583fcace-48c2-404d-b802-449886c3ccee",
+          "name": "A-WR-3",
+          "position": "WR",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 13,
+            "draftRound": 7,
+            "orderPosition": 1
+          }
+        }
+      ]
+    },
+    {
+      "team": {
+        "seasonTeamId": "a2d929e4-0b63-4149-bec7-02a2324b4bdc",
+        "teamId": "team-beta",
+        "name": "Beta",
+        "seedOrder": 2
+      },
+      "players": [
+        {
+          "id": "c7a99fc8-b584-418e-92c4-d3b71664c31f",
+          "name": "B-DST-1",
+          "position": "DST",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 22,
+            "draftRound": 11,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "2f156a43-9c09-4e72-965d-2345d4ef92e1",
+          "name": "B-DST-2",
+          "position": "DST",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 24,
+            "draftRound": 12,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "c89cee8e-eb19-481d-82b0-9b7385a6513a",
+          "name": "B-K-2",
+          "position": "K",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 20,
+            "draftRound": 10,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "cca9f755-f70e-40b6-867d-e8aa71ff11c9",
+          "name": "B-QB-1",
+          "position": "QB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "AUCTION",
+            "auctionRound": 1,
+            "cost": 10
+          }
+        },
+        {
+          "id": "149964cf-7ad4-4e70-b00e-370e5ae8c54d",
+          "name": "B-QB-2",
+          "position": "QB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 2,
+            "draftRound": 1,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "18e21a52-c0f2-459e-b54d-474b38c7de16",
+          "name": "B-RB-1",
+          "position": "RB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 4,
+            "draftRound": 2,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "69da2589-b3c0-4870-805a-f14abcb50ddd",
+          "name": "B-RB-2",
+          "position": "RB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 6,
+            "draftRound": 3,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "ccda1e0f-3e9c-4496-bfa7-070253a99fc0",
+          "name": "B-RB-3",
+          "position": "RB",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 8,
+            "draftRound": 4,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "a1af24d0-4711-4bb4-a7df-2bebafd419b6",
+          "name": "B-TE-1",
+          "position": "TE",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 16,
+            "draftRound": 8,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "6161d323-eaca-47ce-8480-25a68c3702c3",
+          "name": "B-TE-2",
+          "position": "TE",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 18,
+            "draftRound": 9,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "f72b6d33-78fb-4756-9771-003248c94252",
+          "name": "B-WR-1",
+          "position": "WR",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 10,
+            "draftRound": 5,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "029a84a7-650e-4fc2-a99d-4fd9aeccdd6f",
+          "name": "B-WR-2",
+          "position": "WR",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 12,
+            "draftRound": 6,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "6ab515fb-f70d-4d45-848c-4c4e04b3bf4b",
+          "name": "B-WR-3",
+          "position": "WR",
+          "sourceType": "NFL",
+          "custom": false,
+          "acquisition": {
+            "source": "CONVENTIONAL",
+            "overallPick": 14,
+            "draftRound": 7,
+            "orderPosition": 2
+          }
+        },
+        {
+          "id": "custom-beta-keeper",
+          "name": "Custom Beta Keeper",
+          "position": "K",
+          "sourceType": "LEAGUE_CUSTOM",
+          "custom": true,
+          "acquisition": {
+            "source": "KEEPER",
+            "cost": 50
+          }
+        }
+      ]
+    }
+  ]
+}

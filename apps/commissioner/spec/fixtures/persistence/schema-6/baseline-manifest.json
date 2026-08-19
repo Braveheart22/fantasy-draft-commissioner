@@ -1,0 +1,2687 @@
+{
+  "format": "commissioner-schema-6-baseline/v1",
+  "provenance": {
+    "commit": "23c994c",
+    "tag": "phase2-baseline",
+    "schemaVersion": 6,
+    "generatedThrough": "accepted Commissioner application services and migrations"
+  },
+  "databaseFile": "released-schema-6.sqlite",
+  "databaseSha256": "4c056d3b0854bd5d670cd7c7d10d0c96e2e081198ab3da1ec8b8a5debaf9c5f7",
+  "wholeDatabaseHashPolicy": "informational-only; additive migrations are expected to change SQLite file bytes",
+  "releasedBackup": {
+    "databaseFile": "d958a21a-dc1c-40ba-a944-6ef5090086a3.db",
+    "manifestFile": "d958a21a-dc1c-40ba-a944-6ef5090086a3.db.manifest.json",
+    "sha256": "1cc0f195b0ed660d39318c4568c296ee176ca0eaf4552f23ba8a7288fc5993ea"
+  },
+  "integrity": "ok",
+  "foreignKeyViolations": [],
+  "seasons": [
+    {
+      "id": "season-schema-6-clean",
+      "state": "SETUP",
+      "rowVersion": 0
+    },
+    {
+      "id": "season-schema-6-completed",
+      "state": "COMPLETED",
+      "rowVersion": 47
+    }
+  ],
+  "lifecycleResumes": [
+    "SETUP",
+    "KEEPERS_LOCKED",
+    "R1_BIDDING",
+    "R1_TIE_PAUSED",
+    "R1_REVIEW",
+    "R1_PUBLISHED",
+    "R2_BIDDING",
+    "R2_TIE_PAUSED",
+    "R2_REVIEW",
+    "R2_PUBLISHED",
+    "ORDER_TIE_PAUSED",
+    "ORDER_FINAL",
+    "CONVENTIONAL_DRAFT",
+    "COMPLETED"
+  ],
+  "correctionResumeDefaults": {
+    "PICK": "CONVENTIONAL_DRAFT",
+    "AUCTION_REOPEN": "R1_BIDDING",
+    "ROUND_1": "KEEPERS_LOCKED",
+    "ROUND_2": "R1_PUBLISHED",
+    "DRAFT_ORDER": "R2_PUBLISHED",
+    "KEEPER": "SETUP"
+  },
+  "defaultClasses": [
+    {
+      "table": "AuctionSubmission",
+      "column": "zeroConfirmed",
+      "defaultValue": "0"
+    },
+    {
+      "table": "BackupRecord",
+      "column": "createdAt",
+      "defaultValue": "CURRENT_TIMESTAMP"
+    },
+    {
+      "table": "CorrectionAction",
+      "column": "createdAt",
+      "defaultValue": "CURRENT_TIMESTAMP"
+    },
+    {
+      "table": "DraftPick",
+      "column": "active",
+      "defaultValue": "1"
+    },
+    {
+      "table": "ExportRecord",
+      "column": "createdAt",
+      "defaultValue": "CURRENT_TIMESTAMP"
+    },
+    {
+      "table": "KeeperSelection",
+      "column": "cost",
+      "defaultValue": "50"
+    },
+    {
+      "table": "Player",
+      "column": "custom",
+      "defaultValue": "0"
+    },
+    {
+      "table": "Player",
+      "column": "available",
+      "defaultValue": "1"
+    },
+    {
+      "table": "Player",
+      "column": "keeperEligible",
+      "defaultValue": "0"
+    },
+    {
+      "table": "Season",
+      "column": "rowVersion",
+      "defaultValue": "0"
+    },
+    {
+      "table": "Season",
+      "column": "active",
+      "defaultValue": "0"
+    },
+    {
+      "table": "SeasonTeam",
+      "column": "active",
+      "defaultValue": "1"
+    }
+  ],
+  "tables": [
+    {
+      "name": "AuctionAttempt",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "roundId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "attemptNumber",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "inputJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "inputHash",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "outputJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "outputHash",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "eliminationsJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "traceJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 10,
+          "name": "contractVersion",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 11,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 12,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "AuctionRound",
+          "from": "roundId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "3c2f421c67dc42b2dc8a99b69383500b1a90b36299d783caf18e4740bf3ebdad"
+    },
+    {
+      "name": "AuctionAward",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "roundId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "playerId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "amount",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "bidId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "sourceAttemptId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "AuctionRound",
+          "from": "roundId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "f78ae493a9c3bc0f3ff26ac524cbbbe69669e7543dfae05d6364edb0738a94c4"
+    },
+    {
+      "name": "AuctionRound",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "roundNumber",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "inputSnapshotId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "inputHash",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "contractVersion",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "publishedAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "ab621e041f911221f6fa5dc639dc67aae46dfa702692c2fc49011cc6bac8bd05"
+    },
+    {
+      "name": "AuctionSubmission",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "roundId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "zeroConfirmed",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "0",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "bidsJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "bidCount",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "updatedAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "AuctionRound",
+          "from": "roundId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 4,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "20d2acac180e8ee1b6deafd7f6950a73d2e1c3caf7e6066a41ef0dd383dd359d"
+    },
+    {
+      "name": "AuctionTieDecision",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "roundId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "tieKey",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "playerId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "amount",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "participantTeamIdsJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "preferredTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "method",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "note",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "decidedAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 10,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "AuctionRound",
+          "from": "roundId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 0,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "AuditEvent",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "sequence",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "actorType",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "actorLabel",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "commandType",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "entityType",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "entityId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "correlationId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "idempotencyKey",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 10,
+          "name": "reason",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 11,
+          "name": "beforeJson",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 12,
+          "name": "afterJson",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 13,
+          "name": "resultJson",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 14,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 51,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "70e4600388c6edd902ff8d5b2e89a38b5178bc05d34460540c4fa472097bf2ff"
+    },
+    {
+      "name": "BackupRecord",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "path",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "manifestPath",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "sha256",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "schemaVersion",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "applicationVersion",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "trigger",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "seasonVersion",
+          "type": "INTEGER",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "dependencyCutHash",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 10,
+          "name": "verifiedAt",
+          "type": "DATETIME",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 11,
+          "name": "createdAt",
+          "type": "DATETIME",
+          "notNull": true,
+          "defaultValue": "CURRENT_TIMESTAMP",
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [],
+      "rowCount": 9,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "0f464fc5813af8c44f24fa4989aff2aae99437174dacc7ca5922db3c4178970f"
+    },
+    {
+      "name": "Checkpoint",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "kind",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "seasonVersion",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "stateSnapshotId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "sourceAuditEventId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "AuditEvent",
+          "from": "sourceAuditEventId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "sequence": 0,
+          "table": "FrozenSnapshot",
+          "from": "stateSnapshotId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 2,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "9e13eafd6748fd70335c47f68b18f2c53a6efa75aee0e03b0d41593f0dcdba2b"
+    },
+    {
+      "name": "ConventionalDraft",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "orderSnapshotId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "orderHash",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "contractVersion",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "completedAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "cc444cd9fe2e96a7f39eff1c88079c0c4be899d38c382d84fdf80b812365904f"
+    },
+    {
+      "name": "CorrectionAction",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "correctionType",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "targetId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "requestedAuditEventId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "rollbackCheckpointId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "seasonVersion",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "dependencyCutHash",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "impactJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "backupHash",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 10,
+          "name": "reason",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 11,
+          "name": "confirmedAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 12,
+          "name": "resultAuditEventId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 13,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 14,
+          "name": "createdAt",
+          "type": "DATETIME",
+          "notNull": true,
+          "defaultValue": "CURRENT_TIMESTAMP",
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "CASCADE",
+          "onDelete": "RESTRICT",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "48d381dd424986e34a4924ae8a562443cfd0b0414a72afb32f7205dadbf4af6f"
+    },
+    {
+      "name": "DraftOrderEntry",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "conventionalDraftId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "orderPosition",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "remainingBalance",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "SeasonTeam",
+          "from": "seasonTeamId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "sequence": 0,
+          "table": "ConventionalDraft",
+          "from": "conventionalDraftId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "e3f3b2541abc7bacca28df871cee0aaedb5828354085d5b5a79431cd983ad368"
+    },
+    {
+      "name": "DraftOrderTieDecision",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "conventionalDraftId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "balance",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "participantTeamIdsJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "precedenceTeamIdsJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "method",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "note",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "decidedAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "ConventionalDraft",
+          "from": "conventionalDraftId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "84401caddae3259ae17eaeb405070827027f395d0b565574f7082e7579bc2893"
+    },
+    {
+      "name": "DraftPick",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "conventionalDraftId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "overallPick",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "roundNumber",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "orderPosition",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "playerId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "active",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "1",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "SeasonTeam",
+          "from": "seasonTeamId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "sequence": 0,
+          "table": "ConventionalDraft",
+          "from": "conventionalDraftId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 25,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "11580726e24d8ef54cb2f19d7c535ae5055c46de73b80dcd6c25827d672f6ec9"
+    },
+    {
+      "name": "ExportRecord",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "backupId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "jsonPath",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "jsonSha256",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "csvPath",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "csvSha256",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "schemaVersion",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "createdAt",
+          "type": "DATETIME",
+          "notNull": true,
+          "defaultValue": "CURRENT_TIMESTAMP",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "CASCADE",
+          "onDelete": "RESTRICT",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "1cc0316a0b243ca8fd64b005ab846ee2471084cf445aec562fe4921beee88804"
+    },
+    {
+      "name": "FrozenSnapshot",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "kind",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "schemaVersion",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "payloadJson",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "sha256",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "sourceAuditEventId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "AuditEvent",
+          "from": "sourceAuditEventId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 4,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "30985fa99cf8b9760f98caa1f71723763a8fd091f0d0f57796654106ad77fefa"
+    },
+    {
+      "name": "KeeperSelection",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "playerId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "cost",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "50",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "startingBudget",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Player",
+          "from": "playerId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "sequence": 0,
+          "table": "SeasonTeam",
+          "from": "seasonTeamId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 2,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "1a8d405d3e7d44e7fdccb38c30ed5cbd7b27a384f52ad981975be13dc2f2672d"
+    },
+    {
+      "name": "League",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "b06f5fdfe1a9ffc8c08abf84c6078df9a73c75845645e794441e065b3cd08bff"
+    },
+    {
+      "name": "Player",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "position",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "sourceType",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "sourceNamespace",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "externalId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "custom",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "0",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "explicitMinimumBid",
+          "type": "INTEGER",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "available",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "1",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 10,
+          "name": "keeperEligible",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "0",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 11,
+          "name": "activeImportBatchId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 12,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 13,
+          "name": "updatedAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 31,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "7d4d5b4b19d44a47bb9f450386b522ac1b18261c37b3a443dda3fab186d7a4f7"
+    },
+    {
+      "name": "PlayerImportBatch",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "sourceNamespace",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "format",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "sha256",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "rowCount",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "supersedesId",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 1,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "d159eae3fa03b3234fe36984f806ce5a8ec82bdc451b08abf66b1377caf55aca"
+    },
+    {
+      "name": "PositionPriceFloor",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "position",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "minimumBid",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 6,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "6919561f3e8614dfd647d13cf3c6be969f82c61345af20955257233bf940766a"
+    },
+    {
+      "name": "RosterAssignment",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "playerId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "acquisitionSource",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "auctionRound",
+          "type": "INTEGER",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "cost",
+          "type": "INTEGER",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "sourceEntityId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "supersededAt",
+          "type": "TEXT",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [],
+      "rowCount": 28,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "69010d1780c9caa6b78f8e22bff9623bb7cad7b7c7fbec538bdfccf0d6f94dfe"
+    },
+    {
+      "name": "SchemaMetadata",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "singleton",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "version",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "applicationVersion",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [],
+      "rowCount": 1,
+      "orderBy": [
+        "singleton"
+      ],
+      "relationalSha256": "6dbc5003a977f28aa58e4c90a61906e48e300804f87af72051561c3608af25dd"
+    },
+    {
+      "name": "Season",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "leagueId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "year",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "teamCount",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "rowVersion",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "0",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "active",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "0",
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 8,
+          "name": "createdAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 9,
+          "name": "updatedAt",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "League",
+          "from": "leagueId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "56fc9f7ba7ea45c673c22253b607f1daa17715d694065c97b57515eac6d2c23d"
+    },
+    {
+      "name": "SeasonTeam",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "teamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "displayName",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "seedOrder",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "active",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": "1",
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "Team",
+          "from": "teamId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "sequence": 0,
+          "table": "Season",
+          "from": "seasonId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "4e284c9873c620d32006f985a53362a5731fa1447d388de9e356b6957a3a8299"
+    },
+    {
+      "name": "Team",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "leagueId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "franchiseName",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [
+        {
+          "id": 0,
+          "sequence": 0,
+          "table": "League",
+          "from": "leagueId",
+          "to": "id",
+          "onUpdate": "NO ACTION",
+          "onDelete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "rowCount": 2,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "2d3a41cd2ac63b6255f1995c85a3da1db0671c32f27edb0444d00a54cafd5e89"
+    },
+    {
+      "name": "TeamAuctionBalance",
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 1
+        },
+        {
+          "cid": 1,
+          "name": "seasonId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 2,
+          "name": "seasonTeamId",
+          "type": "TEXT",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 3,
+          "name": "roundNumber",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 4,
+          "name": "startingBudget",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 5,
+          "name": "spent",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 6,
+          "name": "remainingBudget",
+          "type": "INTEGER",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        },
+        {
+          "cid": 7,
+          "name": "supersededAt",
+          "type": "DATETIME",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKeyOrdinal": 0
+        }
+      ],
+      "foreignKeys": [],
+      "rowCount": 4,
+      "orderBy": [
+        "id"
+      ],
+      "relationalSha256": "c188c6248411746646f9f05018b51e243436a9d3da3605c30811b9f817fa0b74"
+    }
+  ],
+  "immutableHashes": {
+    "frozenSnapshots": [
+      {
+        "id": "47919a62-6824-4759-9e6e-0ff01bda962e",
+        "kind": "AUCTION_R1_INPUT",
+        "sha256": "4a8fe8dc247ab0ac5ca2b3e5b4f5161fae0c6696f6d7a10370cec5c8ef575d81",
+        "payloadSha256": "4a8fe8dc247ab0ac5ca2b3e5b4f5161fae0c6696f6d7a10370cec5c8ef575d81"
+      },
+      {
+        "id": "4a165f99-1ff1-4acf-a558-319c1c49b962",
+        "kind": "AUCTION_R2_INPUT",
+        "sha256": "129339075232cad361afd8a46f9184b2eb89425c24a09f2a983049bc52c041bb",
+        "payloadSha256": "129339075232cad361afd8a46f9184b2eb89425c24a09f2a983049bc52c041bb"
+      },
+      {
+        "id": "aa575fc1-3eb8-43a7-a620-ef27e1bb4dd4",
+        "kind": "KEEPER_LOCK",
+        "sha256": "e50ddbaea4d546d9f0eceef2212a6cfa68039f8e0fe41776fe7552b2478f9947",
+        "payloadSha256": "e50ddbaea4d546d9f0eceef2212a6cfa68039f8e0fe41776fe7552b2478f9947"
+      },
+      {
+        "id": "f113dbd1-7add-4238-a6eb-f26b0beac277",
+        "kind": "DRAFT_ORDER",
+        "sha256": "bc7683467261a629fad75d8d92143d099d8624b7408a9be919cd7b60a4f31266",
+        "payloadSha256": "bc7683467261a629fad75d8d92143d099d8624b7408a9be919cd7b60a4f31266"
+      }
+    ],
+    "auctionAttempts": [
+      {
+        "id": "65059a2f-5b61-4725-bfb6-f00f22a1a45f",
+        "roundId": "2a840d55-c98e-4534-bc18-a6be83f635c0",
+        "attemptNumber": 1,
+        "inputHash": "129339075232cad361afd8a46f9184b2eb89425c24a09f2a983049bc52c041bb",
+        "inputJsonSha256": "129339075232cad361afd8a46f9184b2eb89425c24a09f2a983049bc52c041bb",
+        "outputHash": "9f37acb421344201f1296ed0bc79e3034ac59ad1b579464db81a8a7036f2cd46",
+        "outputJsonSha256": "9f37acb421344201f1296ed0bc79e3034ac59ad1b579464db81a8a7036f2cd46"
+      },
+      {
+        "id": "a975ee2e-5b14-4539-a88e-038fa3bfe928",
+        "roundId": "d60e3a28-ec74-4059-8607-028d74bc7c84",
+        "attemptNumber": 1,
+        "inputHash": "4a8fe8dc247ab0ac5ca2b3e5b4f5161fae0c6696f6d7a10370cec5c8ef575d81",
+        "inputJsonSha256": "4a8fe8dc247ab0ac5ca2b3e5b4f5161fae0c6696f6d7a10370cec5c8ef575d81",
+        "outputHash": "744c0a4280f3960345abaafa30f3d367a4eddf59336bca5707f4baa643208146",
+        "outputJsonSha256": "744c0a4280f3960345abaafa30f3d367a4eddf59336bca5707f4baa643208146"
+      }
+    ],
+    "conventionalDraft": [
+      {
+        "id": "d4103e5d-3bde-424d-a5fa-3144315863fe",
+        "orderSnapshotId": "f113dbd1-7add-4238-a6eb-f26b0beac277",
+        "orderHash": "bc7683467261a629fad75d8d92143d099d8624b7408a9be919cd7b60a4f31266"
+      }
+    ],
+    "backupRecords": [
+      {
+        "id": "11f6508d-16b8-41a6-98c7-f1adf6ff9f93",
+        "trigger": "PRE_AUCTION_R2_LOCK",
+        "sha256": "58861823a857ef05f3d6240b01734843b1208fc5d2b9af54fdf4a66ba1efe314",
+        "schemaVersion": 6,
+        "seasonVersion": 16,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "16fe53cc-785a-441d-b545-d9ed1cd44823",
+        "trigger": "PRE_CORRECTION",
+        "sha256": "bdfb78358a7167c80395df7f3791ea9d0d85ab25f441490348b9b3e9bdac623b",
+        "schemaVersion": 6,
+        "seasonVersion": 47,
+        "dependencyCutHash": "1f007531a27a401e56ab98ccbeff3cab71b7e965c007acc5dad0b02cc36b29a0"
+      },
+      {
+        "id": "3869db5c-330d-46b5-84c5-3050d6ee9cc4",
+        "trigger": "PRE_CONVENTIONAL_DRAFT_START",
+        "sha256": "29b62f45f726f56c847b9855e897db6a694092699a5fc2dd97879a7959694f76",
+        "schemaVersion": 6,
+        "seasonVersion": 22,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "55640abe-cfbe-483a-9f18-4a57e76e45e2",
+        "trigger": "PRE_KEEPER_LOCK",
+        "sha256": "9f6eabcdc5f1c2502e2fb5bd075cec1ce3843086183a98e34dd51fece80d2a0d",
+        "schemaVersion": 6,
+        "seasonVersion": 6,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "b0b16b66-61c8-4a2d-9516-e9fdef65852d",
+        "trigger": "PRE_AUCTION_R1_PUBLICATION",
+        "sha256": "b4ab44d8d89dcb09486b1e46513eaa9167cbc7fd658d4b075a3577e1bf5865db",
+        "schemaVersion": 6,
+        "seasonVersion": 12,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "c976f390-be8f-4070-85fc-73cd18f6bac2",
+        "trigger": "PRE_AUCTION_R2_PUBLICATION",
+        "sha256": "789b42d7af098092729ec2e51dbc6409c9e1a7ba0db7677618964bf12498f1d4",
+        "schemaVersion": 6,
+        "seasonVersion": 18,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "ceaacd86-ec08-4463-bf9a-5764cd14a8ae",
+        "trigger": "PRE_EXPORT",
+        "sha256": "878adb4d9cec0d9a96a9de826645a2e8ccb760d815dd714bc55136baf1f5116a",
+        "schemaVersion": 6,
+        "seasonVersion": 47,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "e46ab7c7-fc6a-4c45-9475-871502a1a180",
+        "trigger": "PRE_AUCTION_R1_LOCK",
+        "sha256": "ba40461cdadc09e513b30069e63883f728f8c8d3680916d943ae689a431e7d45",
+        "schemaVersion": 6,
+        "seasonVersion": 10,
+        "dependencyCutHash": null
+      },
+      {
+        "id": "e4870cc7-1e53-498b-8b1e-abaa33fc8748",
+        "trigger": "PRE_DRAFT_ORDER_FINALIZE",
+        "sha256": "40d468195a6652eb05f513e4bcd4e46fddf77d80399f330af3c312f675c8d72d",
+        "schemaVersion": 6,
+        "seasonVersion": 21,
+        "dependencyCutHash": null
+      }
+    ],
+    "exportRecords": [
+      {
+        "id": "12e77f76-ee55-4efb-ac77-d9464a6c29a3",
+        "jsonSha256": "04ea25b7bee61fcc47493403f1b33850f72c5d4a5d2863f417a0e36cf1a708a5",
+        "csvSha256": "10fa4c72166c47ac0d0c73037350fc418871d0328b3ce16f43f6ad440ea338c7",
+        "schemaVersion": 1
+      }
+    ],
+    "exportedFiles": {
+      "json": {
+        "file": "artifacts/exports/final-rosters.json",
+        "sha256": "04ea25b7bee61fcc47493403f1b33850f72c5d4a5d2863f417a0e36cf1a708a5"
+      },
+      "csv": {
+        "file": "artifacts/exports/final-rosters.csv",
+        "sha256": "10fa4c72166c47ac0d0c73037350fc418871d0328b3ce16f43f6ad440ea338c7"
+      }
+    }
+  },
+  "semanticCounts": {
+    "customPlayers": 1,
+    "importedPlayers": 30,
+    "availablePlayers": 3,
+    "unavailablePlayers": 28,
+    "ownedPlayers": 28,
+    "unownedPlayers": 3,
+    "auctionRounds": 2,
+    "draftOrderEntries": 2,
+    "draftPicks": 25,
+    "auditEvents": 51,
+    "checkpoints": 1,
+    "backupRecords": 9,
+    "correctionActions": 1,
+    "exports": 1
+  }
+}

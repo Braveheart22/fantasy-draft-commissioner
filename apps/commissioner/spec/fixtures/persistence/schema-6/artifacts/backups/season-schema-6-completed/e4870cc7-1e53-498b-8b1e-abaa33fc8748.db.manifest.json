@@ -1,0 +1,12 @@
+{
+  "format": "league-draft-backup/v1",
+  "backupId": "e4870cc7-1e53-498b-8b1e-abaa33fc8748",
+  "databaseFile": "e4870cc7-1e53-498b-8b1e-abaa33fc8748.db",
+  "sha256": "40d468195a6652eb05f513e4bcd4e46fddf77d80399f330af3c312f675c8d72d",
+  "schemaVersion": 6,
+  "applicationVersion": "0.1.0",
+  "createdAt": "2026-08-19T03:31:53.433Z",
+  "seasonId": "season-schema-6-completed",
+  "seasonVersion": 21,
+  "trigger": "PRE_DRAFT_ORDER_FINALIZE"
+}
