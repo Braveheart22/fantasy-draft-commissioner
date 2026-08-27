@@ -79,6 +79,7 @@ describe("SQLite season persistence", () => {
     const original = await readFile(path);
     await expect(migrateDatabaseCopySafely(path, { injectFailure: true })).rejects.toThrow("Injected migration failure");
     expect(await readFile(path)).toEqual(original);
+    expect(JSON.parse(await readFile(`${path}.migration-rollback.json`, "utf8"))).toMatchObject({ format: "commissioner-migration-rollback/v1", originalRetained: true, error: "Injected migration failure" });
     const raw = new Database(path); raw.prepare("UPDATE SchemaMetadata SET version = 999").run(); raw.close();
     await expect(migrateDatabaseCopySafely(path)).rejects.toThrow("newer schema");
     await writeFile(`${path}.marker`, "original retained");
@@ -123,17 +124,23 @@ describe("SQLite season persistence", () => {
     const store = await openSeasonStore(path);
     expect(await store.getSeason(actor, "season-schema-6-clean")).toMatchObject({ state: LifecycleState.SETUP, rowVersion: 0 });
     expect(await store.getSeason(actor, "season-schema-6-completed")).toMatchObject({ state: LifecycleState.COMPLETED, rowVersion: 47 });
+    await expect(store.assertAvailabilityConsistency("season-schema-6-clean")).resolves.toBeUndefined();
+    await expect(store.assertAvailabilityConsistency("season-schema-6-completed")).resolves.toBeUndefined();
     await store.close();
 
     const database = new Database(path, { readonly: true, fileMustExist: true });
+    expect(database.prepare("SELECT version FROM SchemaMetadata WHERE singleton=1").pluck().get()).toBe(7);
     expect(database.pragma("integrity_check", { simple: true })).toBe("ok");
     expect(database.pragma("foreign_key_check")).toEqual([]);
+    expect(database.prepare("SELECT count(*) FROM PlayerSourceAlias").pluck().get()).toBe(
+      database.prepare("SELECT count(*) FROM Player WHERE sourceNamespace IS NOT NULL AND externalId IS NOT NULL").pluck().get(),
+    );
     for (const table of manifest.tables) {
       const inspected = inspectBaselineTable(database, table);
       expect(inspected.preservedColumns, `${table.name} columns`).toEqual(table.columns);
       expect(inspected.foreignKeys, `${table.name} foreign keys`).toEqual(expect.arrayContaining(table.foreignKeys));
       expect(inspected.rowCount, `${table.name} row count`).toBe(table.rowCount);
-      expect(inspected.relationalSha256, `${table.name} relational fingerprint`).toBe(table.relationalSha256);
+      if (table.name !== "SchemaMetadata") expect(inspected.relationalSha256, `${table.name} relational fingerprint`).toBe(table.relationalSha256);
     }
     for (const expected of manifest.defaultClasses) {
       const table = manifest.tables.find(item => item.name === expected.table)!;

@@ -37,6 +37,8 @@ model Season {
   checkpoints Checkpoint[]
   players Player[]
   importBatches PlayerImportBatch[]
+  catalogSnapshots CatalogSnapshot[]
+  playerAliases PlayerSourceAlias[]
   priceFloors PositionPriceFloor[]
   keepers KeeperSelection[]
   auctionRounds AuctionRound[]
@@ -145,6 +147,13 @@ model Player {
   sourceType String
   sourceNamespace String?
   externalId String?
+  nflTeam String?
+  providerStatus String @default("ACTIVE")
+  providerActive Boolean @default(true)
+  leagueSelectable Boolean @default(true)
+  normalizedSearchText String @default("")
+  sourceUpdatedAt DateTime?
+  catalogSnapshotId String?
   custom Boolean @default(false)
   explicitMinimumBid Int?
   available Boolean @default(true)
@@ -153,7 +162,42 @@ model Player {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   keeper KeeperSelection?
+  aliases PlayerSourceAlias[]
+  catalogSnapshot CatalogSnapshot? @relation(fields: [catalogSnapshotId], references: [id])
   @@unique([seasonId, sourceType, sourceNamespace, externalId])
+  @@index([seasonId, normalizedSearchText])
+  @@index([seasonId, nflTeam, position])
+  @@index([seasonId, providerActive, leagueSelectable])
+}
+model PlayerSourceAlias {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  playerId String
+  player Player @relation(fields: [playerId], references: [id])
+  sourceNamespace String
+  sourceId String
+  createdAt DateTime @default(now())
+  @@unique([seasonId, sourceNamespace, sourceId])
+  @@unique([playerId, sourceNamespace])
+  @@index([playerId])
+}
+model CatalogSnapshot {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceNamespace String
+  state String
+  sourceHash String
+  normalizedHash String
+  sourceUpdatedAt DateTime?
+  approvedAt DateTime?
+  supersedesId String?
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  players Player[]
+  @@unique([seasonId, sourceNamespace, sourceHash])
+  @@index([seasonId, sourceNamespace, state, supersededAt])
 }
 model PlayerImportBatch {
   id String @id

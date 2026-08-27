@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { assertLifecycleTransition } from "../../application/commands/lifecycle.js";
+import type { CatalogPlayer, CatalogQuery, CatalogRepository } from "../../application/catalog/catalog-repository.js";
+import { deriveAvailability } from "../../application/catalog/catalog-service.js";
 import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRoundSummary, TieDecisionInput } from "../../application/auction/auction-repository.js";
 import type { AuctionEngineResult, CommissionerAuctionInput } from "../../application/ports/auction-engine.js";
 import type { ActorDescriptor, CommandMetadata, SeasonRecord, SeasonRepository, SeasonTransaction } from "../../application/ports/season-repository.js";
@@ -33,6 +35,10 @@ function positiveDollar(value: unknown, label: string): number {
   return Number(amount);
 }
 
+function normalizeSearchText(value: string): string {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function parseRows(content: string, format: "csv" | "json"): Array<Record<string, unknown>> {
   if (format === "json") {
     const value: unknown = JSON.parse(content);
@@ -47,8 +53,17 @@ function parseRows(content: string, format: "csv" | "json"): Array<Record<string
 const ENGINE_CONTRACT_VERSION = "phase1/1";
 const hashJson = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function groupBalances<T extends { remainingBudget: number }>(items: T[]): Map<number, T[]> { const groups = new Map<number, T[]>(); for (const item of items) groups.set(item.remainingBudget, [...(groups.get(item.remainingBudget) ?? []), item]); return groups; }
+async function requireSelectablePlayer(database: any, seasonId: string, playerId: string) {
+  const player = await database.player.findFirst({ where: { id: playerId, seasonId } });
+  if (!player) throw new Error(`Player is unavailable: ${playerId}`);
+  const owned = Boolean(await database.rosterAssignment.findFirst({ where: { seasonId, playerId, supersededAt: null }, select: { id: true } }));
+  const availability = deriveAvailability({ owned, leagueSelectable: player.leagueSelectable, providerActive: player.providerActive });
+  if (!availability.available) throw new Error(`Player is unavailable: ${playerId} (${availability.reason})`);
+  if (!player.available) throw new Error(`Player availability compatibility projection is inconsistent: ${playerId}`);
+  return player;
+}
 
-export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository {
+export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
   async seasonVersion(seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
@@ -164,7 +179,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     await this.setupCommand(metadata, async database => {
       const collision = await database.player.findFirst({ where: { seasonId: metadata.seasonId, name: player.name } });
       if (collision) throw new Error("Player identity collision requires review");
-      await database.player.create({ data: { ...player, seasonId: metadata.seasonId, custom: true, explicitMinimumBid: player.explicitMinimumBid ?? null } });
+      await database.player.create({ data: { ...player, seasonId: metadata.seasonId, custom: true, explicitMinimumBid: player.explicitMinimumBid ?? null, normalizedSearchText: normalizeSearchText(player.name), providerStatus: "ACTIVE", providerActive: true, leagueSelectable: true } });
       await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
     });
   }
@@ -210,13 +225,20 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const prior = await database.playerImportBatch.findFirst({ where: { seasonId: metadata.seasonId, sourceNamespace: namespace, supersededAt: null }, orderBy: { createdAt: "desc" } });
       const batchId = randomUUID();
       if (prior) await database.playerImportBatch.update({ where: { id: prior.id }, data: { supersededAt: new Date() } });
-      if (prior) await database.player.updateMany({ where: { seasonId: metadata.seasonId, activeImportBatchId: prior.id, custom: false }, data: { available: false } });
+      if (prior) await database.catalogSnapshot.updateMany({ where: { id: prior.id, supersededAt: null }, data: { state: "SUPERSEDED", supersededAt: new Date() } });
+      if (prior) await database.player.updateMany({ where: { seasonId: metadata.seasonId, activeImportBatchId: prior.id, custom: false }, data: { providerStatus: "INACTIVE", providerActive: false, available: false } });
       await database.playerImportBatch.create({ data: { id: batchId, seasonId: metadata.seasonId, sourceNamespace: namespace, format, sha256: preview.hash, rowCount: preview.rows.length, supersedesId: prior?.id ?? null } });
+      await database.catalogSnapshot.create({ data: { id: batchId, seasonId: metadata.seasonId, sourceNamespace: namespace, state: "APPROVED", sourceHash: preview.hash, normalizedHash: hashJson(preview.rows), approvedAt: new Date(), supersedesId: prior?.id ?? null } });
       for (const row of preview.rows) {
         const current = await database.player.findFirst({ where: { seasonId: metadata.seasonId, sourceType: "NFL", sourceNamespace: namespace, externalId: row.externalId } });
-        const data = { name: row.name, position: row.position, explicitMinimumBid: row.explicitMinimumBid ?? null, activeImportBatchId: batchId, available: true };
+        const owned = current ? Boolean(await database.rosterAssignment.findFirst({ where: { seasonId: metadata.seasonId, playerId: current.id, supersededAt: null }, select: { id: true } })) : false;
+        const data = { name: row.name, position: row.position, explicitMinimumBid: row.explicitMinimumBid ?? null, activeImportBatchId: batchId, catalogSnapshotId: batchId, available: !owned, normalizedSearchText: normalizeSearchText(row.name), providerStatus: "ACTIVE", providerActive: true, leagueSelectable: true };
         if (current) await database.player.update({ where: { id: current.id }, data });
-        else await database.player.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, sourceType: "NFL", sourceNamespace: namespace, externalId: row.externalId, custom: false, ...data } });
+        else {
+          const id = randomUUID();
+          await database.player.create({ data: { id, seasonId: metadata.seasonId, sourceType: "NFL", sourceNamespace: namespace, externalId: row.externalId, custom: false, ...data } });
+          await database.playerSourceAlias.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, playerId: id, sourceNamespace: namespace, sourceId: row.externalId } });
+        }
       }
       await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
       return { noOp: false, batchId };
@@ -240,8 +262,8 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       if (!team) throw new Error("Season team not found");
       await database.keeperSelection.deleteMany({ where: { seasonTeamId } });
       if (playerId) {
-        const player = await database.player.findFirst({ where: { id: playerId, seasonId: metadata.seasonId, available: true, keeperEligible: true } });
-        if (!player) throw new Error("Keeper player is unavailable");
+        const player = await requireSelectablePlayer(database, metadata.seasonId, playerId);
+        if (!player.keeperEligible) throw new Error("Keeper player is unavailable");
         await database.keeperSelection.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, seasonTeamId, playerId, cost: 50, startingBudget: 300 } });
       }
       await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
@@ -294,6 +316,43 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     return { season, teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })), players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return ({ id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available }); }), floors: floorMap };
   }
 
+  async catalogPlayers(_actor: ActorDescriptor, seasonId: string, query: CatalogQuery = {}): Promise<CatalogPlayer[]> {
+    const rows = await this.prisma.player.findMany({
+      where: {
+        seasonId,
+        ...(query.search ? { normalizedSearchText: { contains: normalizeSearchText(query.search) } } : {}),
+        ...(query.nflTeam ? { nflTeam: query.nflTeam.toUpperCase() } : {}),
+        ...(query.position ? { position: query.position.toUpperCase() } : {}),
+        ...(query.sourceType ? { sourceType: query.sourceType } : {}),
+      },
+      include: { aliases: { orderBy: [{ sourceNamespace: "asc" }, { sourceId: "asc" }] } },
+      orderBy: [{ normalizedSearchText: "asc" }, { id: "asc" }],
+    });
+    const assignments = await this.prisma.rosterAssignment.findMany({ where: { seasonId, supersededAt: null }, select: { playerId: true } });
+    const ownedIds = new Set(assignments.map(item => item.playerId));
+    return rows.flatMap(row => {
+      const availability = deriveAvailability({ owned: ownedIds.has(row.id), leagueSelectable: row.leagueSelectable, providerActive: row.providerActive });
+      if (query.availability && availability.reason !== query.availability) return [];
+      return [{
+        id: row.id, name: row.name, position: row.position,
+        ...(row.nflTeam ? { nflTeam: row.nflTeam } : {}), sourceType: row.sourceType,
+        providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable,
+        normalizedSearchText: row.normalizedSearchText, ...(row.sourceUpdatedAt ? { sourceUpdatedAt: row.sourceUpdatedAt } : {}),
+        aliases: row.aliases.map(alias => ({ sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId })),
+        owned: ownedIds.has(row.id), ...availability,
+      }];
+    });
+  }
+
+  async assertAvailabilityConsistency(seasonId: string): Promise<void> {
+    const rows = await this.catalogPlayers({ type: "SYSTEM", label: "availability-consistency" }, seasonId);
+    const contradictions = rows.filter(row => row.available !== (row.reason === "AVAILABLE"));
+    const persisted = await this.prisma.player.findMany({ where: { seasonId }, select: { id: true, available: true } });
+    const derived = new Map(rows.map(row => [row.id, row.available]));
+    contradictions.push(...persisted.filter(row => derived.get(row.id) !== row.available).map(row => rows.find(item => item.id === row.id)!).filter(Boolean));
+    if (contradictions.length) throw new Error(`Player availability compatibility projection is inconsistent: ${[...new Set(contradictions.map(row => row.id))].join(", ")}`);
+  }
+
   async openRound(metadata: CommandMetadata, roundNumber: AuctionRoundNumber): Promise<AuctionRoundSummary> {
     const expected = roundNumber === 1 ? LifecycleState.KEEPERS_LOCKED : LifecycleState.R1_PUBLISHED;
     await this.setupCommand(metadata, async database => {
@@ -325,8 +384,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const seen = new Set<string>();
       for (const bid of bids) {
         if (seen.has(bid.playerId)) throw new Error("A team cannot bid on the same player twice"); seen.add(bid.playerId);
-        const player = await database.player.findFirst({ where: { id: bid.playerId, seasonId: metadata.seasonId, available: true } });
-        if (!player) throw new Error(`Player is unavailable: ${bid.playerId}`);
+        await requireSelectablePlayer(database, metadata.seasonId, bid.playerId);
       }
       const encoded = bids.map((bid, index) => ({ bidId: `${submission.id}:${index + 1}`, priority: (index + 1) as 1 | 2 | 3, ...bid }));
       await database.auctionSubmission.update({ where: { id: submission.id }, data: { bidsJson: JSON.stringify(encoded), bidCount: bids.length, status: finalize ? "FINAL" : "DRAFT", zeroConfirmed: bids.length === 0 && confirmZero } });
@@ -466,7 +524,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       if (draft.status !== "FINAL" && draft.status !== "IN_PROGRESS") throw new Error("Conventional draft is not open");
       const order = await database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }); const pickCount = await database.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } });
       const current = order[pickCount % order.length]; if (!current || current.seasonTeamId !== input.seasonTeamId) throw new Error("Only the team currently on the clock may pick");
-      const player = await database.player.findFirst({ where: { id: input.playerId, seasonId: metadata.seasonId, available: true } }); if (!player) throw new Error("Player is unavailable");
+      const player = await requireSelectablePlayer(database, metadata.seasonId, input.playerId);
       const assignments = await database.rosterAssignment.findMany({ where: { seasonId: metadata.seasonId, seasonTeamId: input.seasonTeamId, supersededAt: null } }); const players = await database.player.findMany({ where: { id: { in: assignments.map(item => item.playerId) } } });
       const result = canAddPlayerThroughPhase1(players.map(item => item.position), player.position, input.rosterRules); if (!result.legal) throw new Error(`Illegal partial roster: ${result.reason}`);
       const overallPick = pickCount + 1; const pickId = randomUUID(); await database.draftPick.create({ data: { id: pickId, conventionalDraftId: draft.id, overallPick, roundNumber: Math.floor(pickCount / order.length) + 1, orderPosition: (pickCount % order.length) + 1, seasonTeamId: input.seasonTeamId, playerId: input.playerId } });

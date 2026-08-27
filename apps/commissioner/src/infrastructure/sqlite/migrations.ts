@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { copyFile, rename, rm } from "node:fs/promises";
+import { copyFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { openDurableDatabase } from "../../server/sqlite-maintenance.js";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 const migrationPaths = [
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170001_u2_persistence/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170002_u3_setup/migration.sql"),
@@ -14,6 +14,7 @@ const migrationPaths = [
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170004_u5_draft/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170005_u6_recovery/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170006_u7_exports/migration.sql"),
+  join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608260001_phase25_u2_catalog/migration.sql"),
 ];
 
 function schemaVersion(database: Database.Database): number | undefined {
@@ -54,5 +55,8 @@ export async function migrateDatabaseCopySafely(path: string, options: { injectF
     await rm(retained, { force: true });
     await rename(path, retained);
     try { await rename(candidate, path); } catch (error) { await rename(retained, path); throw error; }
+  } catch (error) {
+    await writeFile(`${path}.migration-rollback.json`, `${JSON.stringify({ format: "commissioner-migration-rollback/v1", databasePath: path, originalRetained: true, error: error instanceof Error ? error.message : String(error) }, null, 2)}\n`, "utf8");
+    throw error;
   } finally { await rm(candidate, { force: true }); }
 }
