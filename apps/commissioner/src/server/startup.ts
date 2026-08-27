@@ -20,6 +20,8 @@ import { registerOperationsRoutes } from "../routes/operations/operations-routes
 import { CheckpointService } from "../application/backups/checkpoint-service.js";
 import { ExportService } from "../application/exports/export-service.js";
 import { registerExportRoutes } from "../routes/exports/export-routes.js";
+import { BootstrapService } from "../application/bootstrap/bootstrap-service.js";
+import { registerBootstrapRoutes } from "../routes/bootstrap/bootstrap-routes.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -63,6 +65,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const order = new DraftOrderService(store, checkpoints);
   const draft = new ConventionalDraftService(store, checkpoints);
   server.get("/health", async () => ({ status: "ok", dataDirectory }));
+  await registerBootstrapRoutes(server, new BootstrapService(store));
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);

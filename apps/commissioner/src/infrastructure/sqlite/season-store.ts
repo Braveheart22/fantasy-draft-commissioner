@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { assertLifecycleTransition } from "../../application/commands/lifecycle.js";
 import type { CatalogPlayer, CatalogQuery, CatalogRepository } from "../../application/catalog/catalog-repository.js";
+import type { BootstrapRepository } from "../../application/bootstrap/bootstrap-repository.js";
 import { deriveAvailability } from "../../application/catalog/catalog-service.js";
 import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRoundSummary, TieDecisionInput } from "../../application/auction/auction-repository.js";
 import type { AuctionEngineResult, CommissionerAuctionInput } from "../../application/ports/auction-engine.js";
@@ -63,7 +64,7 @@ async function requireSelectablePlayer(database: any, seasonId: string, playerId
   return player;
 }
 
-export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository {
+export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository, BootstrapRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
   async seasonVersion(seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
@@ -123,6 +124,56 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   transition(metadata: CommandMetadata & { expectedVersion: number }, target: LifecycleState): Promise<SeasonRecord> { return this.execute(metadata, tx => tx.transition(metadata.seasonId, metadata.expectedVersion, target)); }
   async getSeason(_actor: ActorDescriptor, seasonId: string): Promise<SeasonRecord | undefined> { const row = await this.prisma.season.findUnique({ where: { id: seasonId } }); return row ? mapSeason(row) : undefined; }
   async listSeasons(_actor: ActorDescriptor): Promise<SeasonRecord[]> { return (await this.prisma.season.findMany({ orderBy: [{ year: "asc" }, { id: "asc" }] })).map(mapSeason); }
+  async readBootstrap(_actor: ActorDescriptor, seasonId: string) {
+    const run = this.queue.then(() => this.prisma.$transaction(async database => {
+      const seasonRow = await database.season.findUnique({ where: { id: seasonId } });
+      if (!seasonRow) throw new Error(`Season not found: ${seasonId}`);
+      const season = mapSeason(seasonRow);
+      const [teams, players, floors, rounds, draft] = await Promise.all([
+        database.seasonTeam.findMany({ where: { seasonId }, include: { keeper: true }, orderBy: { seedOrder: "asc" } }),
+        database.player.findMany({ where: { seasonId }, orderBy: [{ name: "asc" }, { id: "asc" }] }),
+        database.positionPriceFloor.findMany({ where: { seasonId } }),
+        database.auctionRound.findMany({ where: { seasonId, supersededAt: null }, orderBy: { roundNumber: "asc" } }),
+        database.conventionalDraft.findUnique({ where: { seasonId } }),
+      ]);
+      const floorMap = Object.fromEntries(floors.map(floor => [floor.position, floor.minimumBid]));
+      const setup: SetupSummary = {
+        season,
+        teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })),
+        players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return { id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available }; }),
+        floors: floorMap,
+      };
+      const auctionSummary = async (round: typeof rounds[number]): Promise<AuctionRoundSummary> => {
+        const [submissions, attempts, balances] = await Promise.all([
+          database.auctionSubmission.findMany({ where: { roundId: round.id } }),
+          database.auctionAttempt.findMany({ where: { roundId: round.id, supersededAt: null }, orderBy: { attemptNumber: "asc" } }),
+          database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: round.roundNumber } }),
+        ]);
+        const submissionMap = new Map(submissions.map(item => [item.seasonTeamId, item]));
+        return { rowVersion: season.rowVersion, roundId: round.id, roundNumber: round.roundNumber as AuctionRoundNumber, status: round.status, revealed: false, teams: teams.map(team => { const item = submissionMap.get(team.id); return { seasonTeamId: team.id, teamId: team.teamId, displayName: team.displayName, status: item?.status ?? "DRAFT", bidCount: item?.bidCount ?? 0 }; }), attempts: attempts.map(item => ({ attemptNumber: item.attemptNumber, status: item.status, inputHash: item.inputHash, outputHash: item.outputHash, unresolvedTies: (JSON.parse(item.outputJson) as AuctionEngineResult).unresolvedTies })), balances: balances.map(item => ({ seasonTeamId: item.seasonTeamId, startingBudget: item.startingBudget, spent: item.spent, remainingBudget: item.remainingBudget })) };
+      };
+      const summaries = await Promise.all(rounds.map(auctionSummary));
+      let draftSummary: DraftOrderSummary | null = null;
+      if (draft) {
+        const [entries, balances, decisions, pickCount] = await Promise.all([
+          database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }),
+          database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }),
+          database.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null } }),
+          database.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } }),
+        ]);
+        const names = new Map(teams.map(team => [team.id, team.displayName]));
+        const decided = new Set(decisions.map(item => item.balance));
+        const ties = [...groupBalances(balances)].filter(([balance, group]) => group.length > 1 && !decided.has(balance)).map(([balance, group]) => ({ balance, seasonTeamIds: group.map(item => item.seasonTeamId) }));
+        const current = entries.length ? entries[pickCount % entries.length]?.seasonTeamId : undefined;
+        draftSummary = { rowVersion: season.rowVersion, status: draft.status as DraftOrderSummary["status"], ties, order: entries.map(item => ({ orderPosition: item.orderPosition, seasonTeamId: item.seasonTeamId, displayName: names.get(item.seasonTeamId)!, remainingBalance: item.remainingBalance })), nextOverallPick: pickCount + 1, ...(current && draft.status !== "COMPLETED" ? { currentSeasonTeamId: current } : {}) };
+      }
+      const teamsReady = teams.length === season.teamCount;
+      const catalogReady = players.length > 0;
+      const pricingReady = PLAYER_POSITIONS.every(position => floorMap[position] !== undefined);
+      return { season, setup, readiness: { setupReady: teamsReady && catalogReady && pricingReady, teamsReady, catalogReady, pricingReady }, phases: { auctionOne: summaries.find(item => item.roundNumber === 1) ?? null, auctionTwo: summaries.find(item => item.roundNumber === 2) ?? null, draft: draftSummary } };
+    }));
+    return run;
+  }
   async auditForSeason(_actor: ActorDescriptor, seasonId: string): Promise<Record<string, unknown>[]> { return this.prisma.auditEvent.findMany({ where: { seasonId }, orderBy: { sequence: "asc" } }); }
   async recoverySummary(actor: ActorDescriptor, seasonId: string) { const [season, last, integrity] = await Promise.all([this.getSeason(actor, seasonId), this.prisma.auditEvent.findFirst({ where: { seasonId }, orderBy: { sequence: "desc" } }), this.prisma.$queryRawUnsafe<Array<{ integrity_check: string }>>("PRAGMA integrity_check")]); return { integrity: integrity[0]?.integrity_check, season, lastCommandType: last?.commandType, lastCommittedAt: last?.createdAt }; }
   async attemptAuditMutationForTesting(): Promise<void> { await this.prisma.$executeRawUnsafe("UPDATE AuditEvent SET commandType = 'tampered'"); }

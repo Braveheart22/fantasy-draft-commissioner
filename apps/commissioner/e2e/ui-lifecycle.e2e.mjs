@@ -64,7 +64,7 @@ test("commissioner UI completes both rounds, order, fixed draft, recovery, and e
     }
   }
   await page.getByRole("button", { name: "Show recovery summary" }).click();
-  await expect(page.getByText("Database integrity: ok; schema 6.")).toBeVisible();
+  await expect(page.getByText("Database integrity: ok; schema 7.")).toBeVisible();
   await page.getByRole("button", { name: "Create CSV & JSON" }).click();
   await expect(page.getByText("Export complete")).toBeVisible();
   await expect(page.getByText(/final-rosters\.json/)).toBeVisible();
@@ -94,7 +94,7 @@ test("commissioner UI records an auction tie and confirms an audited correction"
   await expect(page.getByText(/Restore is intentionally unavailable/)).toBeVisible();
 });
 
-test("loading another season replaces advanced auction and draft UI state", async ({ page, request }) => {
+test("loading another season replaces active staged UI state", async ({ page, request }) => {
   const currentSeasonId = `ui-current-${Date.now()}`;
   const advancedSeasonId = `ui-advanced-${Date.now()}`;
   const current = await seedLockedSeason(request, currentSeasonId, 1);
@@ -108,7 +108,7 @@ test("loading another season replaces advanced auction and draft UI state", asyn
   await act(page, page.getByRole("button", { name: /Record external order tie/ }));
   await act(page, page.getByRole("button", { name: "Finalize permanent order" }));
   await expect(page.getByText("Pick 1:", { exact: false })).toBeVisible();
-  await page.getByLabel("Bid player ID").fill(`${advancedSeasonId}-stale-bid`);
+  await expect(page.getByLabel("Bid player ID")).toHaveCount(0);
   await page.getByLabel("Available player ID").fill(`${advancedSeasonId}-stale-pick`);
 
   await page.getByLabel("Existing season ID").fill(currentSeasonId);
@@ -119,4 +119,22 @@ test("loading another season replaces advanced auction and draft UI state", asyn
   await expect(page.getByLabel("Bid player ID")).toHaveValue("");
   await expect(page.getByLabel("Available player ID")).toHaveCount(0);
   await expect(page.getByText("Pick 1:", { exact: false })).toHaveCount(0);
+});
+
+test("direct future navigation redirects and completed stages expose no normal mutations", async ({ page, request }) => {
+  const seasonId = `ui-navigation-${Date.now()}`;
+  await seedLockedSeason(request, seasonId, 1);
+  await load(page, seasonId);
+
+  await page.evaluate(() => { location.hash = "stage/DRAFT"; });
+  await expect(page.getByRole("note")).toContainText("Draft is not available until Auction 1 is complete");
+  await expect(page.locator('[data-stage="AUCTION_1"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open round 1" })).toBeEnabled();
+
+  await page.getByRole("link", { name: "Setup" }).click();
+  await expect(page.locator('[data-stage="SETUP"][data-mode="READ_ONLY"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add teams" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Set $1 floors" })).toBeDisabled();
+  await expect(page.getByRole("link", { name: "Preview a correction in Operations" })).toHaveAttribute("href", "#operations");
+  await expect(page.getByRole("button", { name: "Open round 1" })).toHaveCount(0);
 });
