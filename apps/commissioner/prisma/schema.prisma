@@ -38,6 +38,7 @@ model Season {
   players Player[]
   importBatches PlayerImportBatch[]
   catalogSnapshots CatalogSnapshot[]
+  catalogPreparationBatches CatalogPreparationBatch[]
   playerAliases PlayerSourceAlias[]
   priceFloors PositionPriceFloor[]
   keepers KeeperSelection[]
@@ -154,6 +155,8 @@ model Player {
   normalizedSearchText String @default("")
   sourceUpdatedAt DateTime?
   catalogSnapshotId String?
+  supersedesPlayerId String?
+  supersededAt DateTime?
   custom Boolean @default(false)
   explicitMinimumBid Int?
   available Boolean @default(true)
@@ -198,6 +201,46 @@ model CatalogSnapshot {
   players Player[]
   @@unique([seasonId, sourceNamespace, sourceHash])
   @@index([seasonId, sourceNamespace, state, supersededAt])
+}
+model CatalogPreparationBatch {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceNamespace String
+  format String
+  sourceHash String
+  normalizedHash String
+  expectedSeasonVersion Int
+  state String
+  rowCount Int
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+  approvedAt DateTime?
+  rows CatalogPreparationRow[]
+  @@unique([seasonId, sourceNamespace, sourceHash])
+  @@index([seasonId, state, createdAt])
+}
+model CatalogPreparationRow {
+  id String @id
+  batchId String
+  batch CatalogPreparationBatch @relation(fields: [batchId], references: [id])
+  rowNumber Int
+  operation String @default("UPSERT")
+  externalId String
+  name String
+  position String
+  nflTeam String?
+  providerStatus String
+  providerActive Boolean
+  leagueSelectable Boolean
+  sourceUpdatedAt DateTime?
+  aliasesJson String
+  reviewKind String?
+  reviewMessage String?
+  disposition String?
+  resolutionPlayerId String?
+  @@unique([batchId, rowNumber])
+  @@index([batchId, reviewKind, disposition])
 }
 model PlayerImportBatch {
   id String @id

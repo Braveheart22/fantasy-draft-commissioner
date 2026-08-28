@@ -22,6 +22,9 @@ import { ExportService } from "../application/exports/export-service.js";
 import { registerExportRoutes } from "../routes/exports/export-routes.js";
 import { BootstrapService } from "../application/bootstrap/bootstrap-service.js";
 import { registerBootstrapRoutes } from "../routes/bootstrap/bootstrap-routes.js";
+import { CatalogPreparationService } from "../application/catalog/catalog-preparation-service.js";
+import { registerCatalogRoutes } from "../routes/catalog/catalog-routes.js";
+import { registerLocalTrustBoundary } from "./local-trust-boundary.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -56,6 +59,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const dataDirectory = options.dataDirectory ?? resolveDataDirectory();
   await mkdir(dataDirectory, { recursive: true });
   const server = Fastify({ logger: false });
+  registerLocalTrustBoundary(server);
   const databasePath = join(dataDirectory, "commissioner.db");
   const store = await openSeasonStore(databasePath);
   const backupDirectory = join(dataDirectory, "backups");
@@ -66,6 +70,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const draft = new ConventionalDraftService(store, checkpoints);
   server.get("/health", async () => ({ status: "ok", dataDirectory }));
   await registerBootstrapRoutes(server, new BootstrapService(store));
+  await registerCatalogRoutes(server, new CatalogPreparationService(store), store);
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);

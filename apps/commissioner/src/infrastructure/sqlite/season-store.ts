@@ -3,6 +3,9 @@ import { existsSync } from "node:fs";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { assertLifecycleTransition } from "../../application/commands/lifecycle.js";
 import type { CatalogPlayer, CatalogQuery, CatalogRepository } from "../../application/catalog/catalog-repository.js";
+import type { CatalogDisposition, CatalogPreparationRepository, CatalogPreparationView, CatalogReviewKind } from "../../application/catalog/catalog-preparation-repository.js";
+import type { CatalogNormalizationResult, CanonicalCatalogRow } from "../../application/catalog-sources/canonical-catalog-normalizer.js";
+import type { CanonicalCatalogFormat } from "../../application/catalog-sources/catalog-source.js";
 import type { BootstrapRepository } from "../../application/bootstrap/bootstrap-repository.js";
 import { deriveAvailability } from "../../application/catalog/catalog-service.js";
 import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRoundSummary, TieDecisionInput } from "../../application/auction/auction-repository.js";
@@ -64,7 +67,7 @@ async function requireSelectablePlayer(database: any, seasonId: string, playerId
   return player;
 }
 
-export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository, BootstrapRepository {
+export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository, CatalogPreparationRepository, BootstrapRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
   async seasonVersion(seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
@@ -293,6 +296,188 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       }
       await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
       return { noOp: false, batchId };
+    });
+  }
+
+  async catalogPreparation(_actor: ActorDescriptor, seasonId: string, batchId: string): Promise<CatalogPreparationView> {
+    const batch = await this.prisma.catalogPreparationBatch.findFirst({ where: { id: batchId, seasonId }, include: { rows: { orderBy: { rowNumber: "asc" } } } });
+    if (!batch) throw new Error(`Catalog preparation not found: ${batchId}`);
+    const rows = batch.rows.map(row => ({ rowNumber: row.rowNumber, operation: row.operation as "UPSERT" | "OMIT", externalId: row.externalId, name: row.name, position: row.position, ...(row.reviewKind ? { reviewKind: row.reviewKind as CatalogReviewKind } : {}), ...(row.reviewMessage ? { reviewMessage: row.reviewMessage } : {}), ...(row.disposition ? { disposition: row.disposition as CatalogDisposition } : {}), ...(row.resolutionPlayerId ? { resolutionPlayerId: row.resolutionPlayerId } : {}) }));
+    const state = batch.state === "STAGED" && batch.expiresAt && batch.expiresAt <= new Date() ? "EXPIRED" : batch.state;
+    return { id: batch.id, sourceNamespace: batch.sourceNamespace, format: batch.format as CanonicalCatalogFormat, sourceHash: batch.sourceHash, normalizedHash: batch.normalizedHash, expectedSeasonVersion: batch.expectedSeasonVersion, state: state as CatalogPreparationView["state"], rowCount: batch.rowCount, unresolvedCount: rows.filter(row => row.reviewKind && !row.disposition).length, rows };
+  }
+
+  async stageCatalog(metadata: CommandMetadata, sourceNamespace: string, format: CanonicalCatalogFormat, normalized: CatalogNormalizationResult): Promise<CatalogPreparationView> {
+    await this.assertSetup(metadata.seasonId);
+    const existing = await this.prisma.catalogPreparationBatch.findUnique({ where: { seasonId_sourceNamespace_sourceHash: { seasonId: metadata.seasonId, sourceNamespace, sourceHash: normalized.sourceHash } } });
+    if (existing) return this.catalogPreparation(metadata.actor, metadata.seasonId, existing.id);
+    const batchId = await this.setupCommand(metadata, async database => {
+      const season = await database.season.findUniqueOrThrow({ where: { id: metadata.seasonId } });
+      const id = randomUUID();
+      await database.catalogPreparationBatch.create({ data: { id, seasonId: metadata.seasonId, sourceNamespace, format, sourceHash: normalized.sourceHash, normalizedHash: normalized.normalizedHash, expectedSeasonVersion: season.rowVersion + 1, state: "STAGED", rowCount: normalized.rows.length, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } });
+      const [players, aliases, keepers, assignments, awards, picks] = await Promise.all([
+        database.player.findMany({ where: { seasonId: metadata.seasonId }, include: { aliases: true } }),
+        database.playerSourceAlias.findMany({ where: { seasonId: metadata.seasonId } }),
+        database.keeperSelection.findMany({ where: { seasonId: metadata.seasonId }, select: { playerId: true } }),
+        database.rosterAssignment.findMany({ where: { seasonId: metadata.seasonId }, select: { playerId: true } }),
+        database.auctionAward.findMany({ where: { round: { seasonId: metadata.seasonId } }, select: { playerId: true } }),
+        database.draftPick.findMany({ where: { conventionalDraft: { seasonId: metadata.seasonId } }, select: { playerId: true } }),
+      ]);
+      const names = new Map<string, typeof players>();
+      for (const player of players) names.set(player.normalizedSearchText, [...(names.get(player.normalizedSearchText) ?? []), player]);
+      const identities = new Map(players.filter(player => player.sourceNamespace === sourceNamespace && player.externalId).map(player => [player.externalId!, player]));
+      const aliasMap = new Map(aliases.map(alias => [`${alias.sourceNamespace}\u0000${alias.sourceId}`, alias]));
+      const stagedRows = normalized.rows.map((row, index) => {
+        const normalizedName = normalizeSearchText(row.name);
+        const sameName = names.get(normalizedName) ?? [];
+        const custom = sameName.find(player => player.custom);
+        const sameIdentity = identities.get(row.externalId);
+        const changedId = sameName.find(player => player.sourceNamespace === sourceNamespace && player.externalId !== row.externalId);
+        const crossSource = sameName.find(player => !player.custom && player.sourceNamespace !== sourceNamespace);
+        const aliasCollision = row.aliases.map(alias => aliasMap.get(`${alias.sourceNamespace}\u0000${alias.sourceId}`)).find(Boolean);
+        let reviewKind: CatalogReviewKind | undefined, reviewMessage: string | undefined;
+        if (aliasCollision && (!sameIdentity || aliasCollision.playerId !== sameIdentity.id)) { reviewKind = "ALIAS_COLLISION"; reviewMessage = `${row.name} aliases resolve to another player`; }
+        else if (custom) { reviewKind = "CUSTOM_COLLISION"; reviewMessage = `${row.name} matches protected custom player ${custom.id}`; }
+        else if (changedId) { reviewKind = "EXTERNAL_ID_CHANGE"; reviewMessage = `${row.name} changed external ID from ${changedId.externalId} to ${row.externalId}`; }
+        else if (crossSource && !aliasCollision) { reviewKind = "CROSS_SOURCE_IDENTITY"; reviewMessage = `${row.name} matches ${crossSource.sourceNamespace ?? crossSource.sourceType} without a shared alias`; }
+        else if (sameIdentity && (sameIdentity.name !== row.name || sameIdentity.position !== row.position || sameIdentity.nflTeam !== (row.nflTeam ?? null) || sameIdentity.providerStatus !== row.providerStatus || sameIdentity.providerActive !== row.providerActive)) { reviewKind = "IDENTITY_CHANGE"; reviewMessage = `${row.externalId} changes approved player facts`; }
+        return { id: randomUUID(), batchId: id, rowNumber: index + 1, operation: "UPSERT", externalId: row.externalId, name: row.name, position: row.position, nflTeam: row.nflTeam ?? null, providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable, sourceUpdatedAt: row.sourceUpdatedAt ? new Date(row.sourceUpdatedAt) : null, aliasesJson: JSON.stringify(row.aliases), reviewKind: reviewKind ?? null, reviewMessage: reviewMessage ?? null };
+      });
+      const incomingIds = new Set(normalized.rows.map(row => row.externalId));
+      const referencedIds = new Set([...keepers, ...assignments, ...awards, ...picks].map(item => item.playerId));
+      const omitted = players.filter(player => player.sourceNamespace === sourceNamespace && !player.custom && player.providerActive && player.externalId && !incomingIds.has(player.externalId) && referencedIds.has(player.id));
+      let rowNumber = normalized.rows.length;
+      for (const player of omitted) {
+        rowNumber++;
+        stagedRows.push({ id: randomUUID(), batchId: id, rowNumber, operation: "OMIT", externalId: player.externalId!, name: player.name, position: player.position as CanonicalCatalogRow["position"], nflTeam: player.nflTeam, providerStatus: player.providerStatus, providerActive: player.providerActive, leagueSelectable: player.leagueSelectable, sourceUpdatedAt: player.sourceUpdatedAt, aliasesJson: JSON.stringify(player.aliases.map(alias => ({ sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId }))), reviewKind: "SOURCE_OMISSION", reviewMessage: `${player.name} is absent from the new source but is referenced by season history` });
+      }
+      if (stagedRows.length) await database.catalogPreparationRow.createMany({ data: stagedRows });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+      return id;
+    });
+    return this.catalogPreparation(metadata.actor, metadata.seasonId, batchId);
+  }
+
+  async setCatalogDisposition(metadata: CommandMetadata, batchId: string, rowNumber: number, input: { disposition: CatalogDisposition; resolutionPlayerId?: string }): Promise<CatalogPreparationView> {
+    await this.assertSetup(metadata.seasonId);
+    await this.setupCommand(metadata, async database => {
+      const batch = await database.catalogPreparationBatch.findFirst({ where: { id: batchId, seasonId: metadata.seasonId, state: "STAGED" } });
+      if (!batch) throw new Error("Active catalog preparation not found");
+      const row = await database.catalogPreparationRow.findUnique({ where: { batchId_rowNumber: { batchId, rowNumber } } });
+      if (!row?.reviewKind) throw new Error("Catalog row does not require a disposition");
+      if (input.disposition === "LINK_EXISTING") {
+        if (!input.resolutionPlayerId) throw new Error("Linked disposition requires a player");
+        const player = await database.player.findFirst({ where: { id: input.resolutionPlayerId, seasonId: metadata.seasonId } });
+        if (!player) throw new Error("Resolution player not found");
+      }
+      const season = await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+      await database.catalogPreparationRow.update({ where: { batchId_rowNumber: { batchId, rowNumber } }, data: { disposition: input.disposition, resolutionPlayerId: input.resolutionPlayerId ?? null } });
+      await database.catalogPreparationBatch.update({ where: { id: batchId }, data: { expectedSeasonVersion: season.rowVersion } });
+    });
+    return this.catalogPreparation(metadata.actor, metadata.seasonId, batchId);
+  }
+
+  async approveCatalog(metadata: CommandMetadata, batchId: string): Promise<{ batchId: string; promotedCount: number; normalizedHash: string }> {
+    await this.assertSetup(metadata.seasonId);
+    return this.setupCommand(metadata, async database => {
+      const batch = await database.catalogPreparationBatch.findFirst({ where: { id: batchId, seasonId: metadata.seasonId }, include: { rows: { orderBy: { rowNumber: "asc" } } } });
+      if (!batch || batch.state !== "STAGED") throw new Error("Active catalog preparation not found");
+      if (batch.expiresAt && batch.expiresAt <= new Date()) throw new Error("Catalog preparation has expired");
+      const season = await database.season.findUniqueOrThrow({ where: { id: metadata.seasonId } });
+      if (batch.expectedSeasonVersion !== season.rowVersion) throw new Error(`Stale catalog batch: expected season version ${batch.expectedSeasonVersion}, found ${season.rowVersion}`);
+      if (batch.rows.some(row => row.reviewKind && !row.disposition)) throw new Error("Catalog approval has unresolved review rows");
+      const prior = await database.playerImportBatch.findFirst({ where: { seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, supersededAt: null }, orderBy: { createdAt: "desc" } });
+      if (prior) {
+        await database.playerImportBatch.update({ where: { id: prior.id }, data: { supersededAt: new Date() } });
+        await database.catalogSnapshot.updateMany({ where: { id: prior.id, supersededAt: null }, data: { state: "SUPERSEDED", supersededAt: new Date() } });
+      }
+      await database.player.updateMany({ where: { seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, custom: false }, data: { providerStatus: "INACTIVE", providerActive: false, available: false } });
+      await database.playerImportBatch.create({ data: { id: batch.id, seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, format: batch.format, sha256: batch.sourceHash, rowCount: batch.rowCount, supersedesId: prior?.id ?? null } });
+      await database.catalogSnapshot.create({ data: { id: batch.id, seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, state: "APPROVED", sourceHash: batch.sourceHash, normalizedHash: batch.normalizedHash, approvedAt: new Date(), supersedesId: prior?.id ?? null } });
+      const upserts = batch.rows.filter(row => row.operation === "UPSERT");
+      const namespacePlayers = await database.player.findMany({ where: { seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, custom: false }, select: { externalId: true } });
+      const freshPromotion = namespacePlayers.length === 0 && upserts.every(row => row.disposition !== "LINK_EXISTING");
+      if (freshPromotion) {
+        const playerRows = upserts.map(row => ({ id: randomUUID(), seasonId: metadata.seasonId, name: row.name, position: row.position, sourceType: "NFL", sourceNamespace: batch.sourceNamespace, externalId: row.externalId, nflTeam: row.nflTeam, providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable, normalizedSearchText: normalizeSearchText(row.name), sourceUpdatedAt: row.sourceUpdatedAt, catalogSnapshotId: batch.id, custom: false, explicitMinimumBid: null, available: row.providerActive && row.leagueSelectable, keeperEligible: false, activeImportBatchId: batch.id }));
+        const ids = new Map(playerRows.map((player, index) => [upserts[index]!.rowNumber, player.id]));
+        const aliasRows = upserts.flatMap(row => (JSON.parse(row.aliasesJson) as CanonicalCatalogRow["aliases"]).map(alias => ({ id: randomUUID(), seasonId: metadata.seasonId, playerId: ids.get(row.rowNumber)!, sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId })));
+        if (aliasRows.length) {
+          const stagedAliasKeys = new Set(aliasRows.map(alias => `${alias.sourceNamespace}\u0000${alias.sourceId}`));
+          const collision = (await database.playerSourceAlias.findMany({ where: { seasonId: metadata.seasonId }, select: { sourceNamespace: true, sourceId: true } })).find(alias => stagedAliasKeys.has(`${alias.sourceNamespace}\u0000${alias.sourceId}`));
+          if (collision) throw new Error(`Alias collision during promotion: ${collision.sourceNamespace}/${collision.sourceId}`);
+        }
+        if (playerRows.length) await database.player.createMany({ data: playerRows });
+        if (aliasRows.length) await database.playerSourceAlias.createMany({ data: aliasRows });
+      }
+      for (const row of batch.rows) {
+        if (row.operation === "OMIT") {
+          if (row.disposition === "KEEP_ACTIVE") {
+            const player = await database.player.findFirstOrThrow({ where: { seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, externalId: row.externalId } });
+            const owned = Boolean(await database.rosterAssignment.findFirst({ where: { seasonId: metadata.seasonId, playerId: player.id, supersededAt: null }, select: { id: true } }));
+            await database.player.update({ where: { id: player.id }, data: { providerStatus: row.providerStatus, providerActive: true, available: deriveAvailability({ owned, leagueSelectable: player.leagueSelectable, providerActive: true }).available } });
+          }
+          continue;
+        }
+        if (freshPromotion) continue;
+        const aliases = JSON.parse(row.aliasesJson) as CanonicalCatalogRow["aliases"];
+        let player = row.disposition === "LINK_EXISTING" && row.resolutionPlayerId ? await database.player.findFirst({ where: { id: row.resolutionPlayerId, seasonId: metadata.seasonId } }) : null;
+        player ??= await database.player.findFirst({ where: { seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, externalId: row.externalId } });
+        const owned = player ? Boolean(await database.rosterAssignment.findFirst({ where: { seasonId: metadata.seasonId, playerId: player.id, supersededAt: null }, select: { id: true } })) : false;
+        const available = !owned && row.providerActive && row.leagueSelectable;
+        const data = { name: row.name, position: row.position, nflTeam: row.nflTeam, providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable, normalizedSearchText: normalizeSearchText(row.name), sourceUpdatedAt: row.sourceUpdatedAt, activeImportBatchId: batch.id, catalogSnapshotId: batch.id, available };
+        if (player) player = await database.player.update({ where: { id: player.id }, data });
+        else player = await database.player.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, sourceType: "NFL", sourceNamespace: batch.sourceNamespace, externalId: row.externalId, custom: false, ...data } });
+        for (const alias of aliases) {
+          const existingAlias = await database.playerSourceAlias.findUnique({ where: { seasonId_sourceNamespace_sourceId: { seasonId: metadata.seasonId, sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId } } });
+          if (existingAlias && existingAlias.playerId !== player.id) throw new Error(`Alias collision during promotion: ${alias.sourceNamespace}/${alias.sourceId}`);
+          const namespaceAlias = await database.playerSourceAlias.findUnique({ where: { playerId_sourceNamespace: { playerId: player.id, sourceNamespace: alias.sourceNamespace } } });
+          if (!existingAlias && !namespaceAlias) await database.playerSourceAlias.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, playerId: player.id, sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId } });
+        }
+      }
+      await database.catalogPreparationBatch.update({ where: { id: batch.id }, data: { state: "APPROVED", approvedAt: new Date() } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+      return { batchId: batch.id, promotedCount: batch.rows.filter(row => row.operation === "UPSERT").length, normalizedHash: batch.normalizedHash };
+    });
+  }
+
+  async cancelCatalogPreparation(metadata: CommandMetadata, batchId: string): Promise<void> {
+    await this.assertSetup(metadata.seasonId);
+    await this.setupCommand(metadata, async database => {
+      const changed = await database.catalogPreparationBatch.updateMany({ where: { id: batchId, seasonId: metadata.seasonId, state: "STAGED" }, data: { state: "CANCELLED" } });
+      if (changed.count !== 1) throw new Error("Active catalog preparation not found");
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+    });
+  }
+
+  async setLeagueSelectability(metadata: CommandMetadata, playerId: string, leagueSelectable: boolean): Promise<void> {
+    await this.assertSetup(metadata.seasonId);
+    await this.setupCommand(metadata, async database => {
+      const player = await database.player.findFirst({ where: { id: playerId, seasonId: metadata.seasonId } });
+      if (!player) throw new Error("Player not found");
+      const owned = Boolean(await database.rosterAssignment.findFirst({ where: { seasonId: metadata.seasonId, playerId, supersededAt: null }, select: { id: true } }));
+      const availability = deriveAvailability({ owned, leagueSelectable, providerActive: player.providerActive });
+      await database.player.update({ where: { id: playerId }, data: { leagueSelectable, available: availability.available } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+    });
+  }
+
+  async reviseCustomPlayer(metadata: CommandMetadata, playerId: string, input: { replacementId?: string; name: string; position: PlayerInput["position"] }): Promise<{ playerId: string; superseded: boolean }> {
+    await this.assertSetup(metadata.seasonId);
+    if (!input.name.trim() || !PLAYER_POSITIONS.includes(input.position)) throw new Error("Custom player name and known position are required");
+    return this.setupCommand(metadata, async database => {
+      const player = await database.player.findFirst({ where: { id: playerId, seasonId: metadata.seasonId, custom: true } });
+      if (!player) throw new Error("Custom player not found");
+      const referenced = Boolean(await database.keeperSelection.findFirst({ where: { playerId }, select: { id: true } })) || Boolean(await database.rosterAssignment.findFirst({ where: { seasonId: metadata.seasonId, playerId }, select: { id: true } }));
+      if (!referenced) {
+        await database.player.update({ where: { id: playerId }, data: { name: input.name.trim(), position: input.position, normalizedSearchText: normalizeSearchText(input.name) } });
+        await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+        return { playerId, superseded: false };
+      }
+      const replacementId = input.replacementId ?? randomUUID();
+      await database.player.update({ where: { id: playerId }, data: { providerStatus: "SUPERSEDED", providerActive: false, leagueSelectable: false, available: false, supersededAt: new Date() } });
+      await database.player.create({ data: { id: replacementId, seasonId: metadata.seasonId, name: input.name.trim(), position: input.position, sourceType: "LEAGUE_CUSTOM", custom: true, normalizedSearchText: normalizeSearchText(input.name), providerStatus: "ACTIVE", providerActive: true, leagueSelectable: true, available: true, supersedesPlayerId: playerId } });
+      await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
+      return { playerId: replacementId, superseded: true };
     });
   }
 

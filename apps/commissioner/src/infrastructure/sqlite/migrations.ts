@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { openDurableDatabase } from "../../server/sqlite-maintenance.js";
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 const migrationPaths = [
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170001_u2_persistence/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170002_u3_setup/migration.sql"),
@@ -15,6 +15,7 @@ const migrationPaths = [
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170005_u6_recovery/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608170006_u7_exports/migration.sql"),
   join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608260001_phase25_u2_catalog/migration.sql"),
+  join(dirname(fileURLToPath(import.meta.url)), "../../../prisma/migrations/202608270001_phase25_u3_catalog_preparation/migration.sql"),
 ];
 
 function schemaVersion(database: Database.Database): number | undefined {
