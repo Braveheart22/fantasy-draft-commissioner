@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+test("Setup offers an explicit Sleeper preparation source without making it a startup dependency", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create two-team season" }).click();
+  await expect(page.getByText("Saved")).toBeVisible();
+  await page.route("**/api/catalog/*/preparations/sleeper", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "synthetic-sleeper", sourceNamespace: "sleeper", format: "json", sourceHash: "a".repeat(64), normalizedHash: "b".repeat(64), expectedSeasonVersion: 1, state: "STAGED", rowCount: 2, unresolvedCount: 0, rows: [] }) }));
+  await page.getByRole("button", { name: "Fetch Sleeper catalog" }).click();
+  await expect(page.getByText("Staged 2 Sleeper players; 0 need review.")).toBeVisible();
+});
+
 test("canonical catalog review survives the normal setup flow through keeper lock", async ({ page }) => {
   await page.goto("/");
   const run = async name => {

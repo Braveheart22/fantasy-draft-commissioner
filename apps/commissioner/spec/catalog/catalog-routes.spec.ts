@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CatalogPreparationService } from "../../src/application/catalog/catalog-preparation-service.js";
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { registerCatalogRoutes } from "../../src/routes/catalog/catalog-routes.js";
@@ -37,5 +37,26 @@ describe("catalog preparation HTTP delivery", () => {
     expect(rejected.statusCode).toBe(400);
     expect(await store.auditForSeason(actor, "s")).toHaveLength(1);
     await server.close(); await store.close();
+  });
+
+  it("calls Sleeper only from the explicit preparation command and leaves approved data unchanged on failure", async () => {
+    const store = await openSeasonStore(join(await mkdtemp(join(tmpdir(), "commissioner-catalog-routes-")), "draft.db"));
+    await store.execute({ actor, seasonId: "s", idempotencyKey: "create", commandType: "CREATE_SEASON" }, tx => tx.createSeason({ id: "s", leagueId: "l", year: 2026, name: "Season", teamCount: 1 }));
+    const acquire = vi.fn(async () => ({ bytes: Buffer.from(JSON.stringify([{ externalId: "1", name: "Sleeper Player", position: "QB" }])), format: "json" as const, sourceNamespace: "sleeper" }));
+    const server = Fastify(); await registerCatalogRoutes(server, new CatalogPreparationService(store), store, { acquire });
+    await server.inject({ method: "GET", url: "/api/catalog/s/players" });
+    expect(acquire).not.toHaveBeenCalled();
+    const staged = await server.inject({ method: "POST", url: "/api/catalog/s/preparations/sleeper", headers: { "idempotency-key": "sleeper", "x-expected-season-version": "0" }, payload: {} });
+    expect(staged).toMatchObject({ statusCode: 200 }); expect(acquire).toHaveBeenCalledOnce();
+    await store.approveCatalog({ actor, seasonId: "s", idempotencyKey: "approve", commandType: "APPROVE_CATALOG", expectedVersion: 1 }, staged.json().id);
+    await server.close();
+
+    const auditCount = (await store.auditForSeason(actor, "s")).length;
+    const failing = Fastify(); await registerCatalogRoutes(failing, new CatalogPreparationService(store), store, { acquire: vi.fn(async () => { throw new Error("provider unavailable"); }) });
+    const rejected = await failing.inject({ method: "POST", url: "/api/catalog/s/preparations/sleeper", headers: { "idempotency-key": "failed", "x-expected-season-version": "2" }, payload: {} });
+    expect(rejected.statusCode).toBe(502);
+    expect(await store.catalogPlayers(actor, "s")).toEqual([expect.objectContaining({ name: "Sleeper Player", providerActive: true })]);
+    expect(await store.auditForSeason(actor, "s")).toHaveLength(auditCount);
+    await failing.close(); await store.close();
   });
 });

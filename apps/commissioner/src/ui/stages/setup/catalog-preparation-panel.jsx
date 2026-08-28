@@ -26,6 +26,10 @@ export function CatalogPreparationPanel({ seasonId, request, onChanged }) {
     try { const next = await request(`/api/catalog/${seasonId}/preparations`, "POST", { sourceNamespace, format, content }); setBatch(next); setActiveIndex(0); setMessage(`Staged ${next.rowCount} players; ${next.unresolvedCount} need review.`); await changed(); }
     catch (error) { setMessage(error.message); }
   };
+  const stageSleeper = async () => {
+    try { setMessage("Fetching Sleeper for annual preparation…"); const next = await request(`/api/catalog/${seasonId}/preparations/sleeper`, "POST", {}); setBatch(next); setActiveIndex(0); setMessage(`Staged ${next.rowCount} Sleeper players; ${next.unresolvedCount} need review.`); await changed(); }
+    catch (error) { setMessage(`${error.message} The last approved catalog is still active; use a canonical file to continue offline.`); }
+  };
   const resolve = async disposition => {
     if (!active) return;
     try { const next = await request(`/api/catalog/${seasonId}/preparations/${batch.id}/rows/${active.rowNumber}`, "PUT", { disposition }); setBatch(next); setMessage(`${next.unresolvedCount} review items remain.`); await changed(); }
@@ -42,6 +46,7 @@ export function CatalogPreparationPanel({ seasonId, request, onChanged }) {
     <label>Canonical format <select value={format} onChange={event => setFormat(event.target.value)}><option value="json">JSON</option><option value="csv">CSV</option></select></label>
     <label>Catalog file <input type="file" accept=".csv,.json,text/csv,application/json" onChange={async event => { const file = event.target.files?.[0]; if (file) { setContent(await file.text()); setFormat(file.name.toLowerCase().endsWith(".csv") ? "csv" : "json"); } }} /></label>
     <button disabled={!content || !sourceNamespace} onClick={stage}>Stage catalog preview</button>
+    <button onClick={stageSleeper}>Fetch Sleeper catalog</button>
     {batch && <div className="catalog-review">
       <p>{batch.rowCount} rows · {batch.unresolvedCount} unresolved · source {batch.sourceHash.slice(0, 12)}</p>
       <label>Review category <select value={filter} onChange={event => { setFilter(event.target.value); setActiveIndex(0); }}><option value="UNRESOLVED">Unresolved only</option><option value="ALL">All rows</option><option value="CUSTOM_COLLISION">Custom collisions</option><option value="IDENTITY_CHANGE">Fact changes</option><option value="EXTERNAL_ID_CHANGE">Rekeyed players</option><option value="CROSS_SOURCE_IDENTITY">Cross-source matches</option><option value="ALIAS_COLLISION">Alias collisions</option><option value="SOURCE_OMISSION">Referenced omissions</option></select></label>

@@ -7,5 +7,5 @@ export interface CatalogSourceArtifact {
 }
 
 export interface CatalogSource {
-  acquire(): Promise<CatalogSourceArtifact>;
+  acquire(options?: { signal?: AbortSignal }): Promise<CatalogSourceArtifact>;
 }

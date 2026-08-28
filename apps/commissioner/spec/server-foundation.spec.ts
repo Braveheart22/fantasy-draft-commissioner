@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openDurableDatabase, stagedRestore, verifiedBackup } from "../src/server/sqlite-maintenance.js";
 import { resolveDataDirectory, startCommissionerServer } from "../src/server/startup.js";
 
@@ -18,6 +18,15 @@ describe("commissioner server foundation", () => {
       .rejects.toMatchObject({ code: "EADDRINUSE" });
     await first.stop();
     await expect(first.stop()).resolves.toBeUndefined();
+  });
+
+  it("does not acquire the preparation-only provider during normal startup or health reads", async () => {
+    const acquire = vi.fn(async () => { throw new Error("provider must remain offline"); });
+    const server = await startCommissionerServer({ port: 0, dataDirectory: await mkdtemp(join(tmpdir(), "league-draft-offline-")), sleeperSource: { acquire } });
+    const response = await fetch(`http://${server.address.host}:${server.address.port}/health`);
+    expect(response.status).toBe(200);
+    expect(acquire).not.toHaveBeenCalled();
+    await server.stop();
   });
 
   it("enforces durability pragmas and backs up/restores through staged files", async () => {

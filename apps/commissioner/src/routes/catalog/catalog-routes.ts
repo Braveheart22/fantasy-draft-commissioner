@@ -2,14 +2,23 @@ import type { FastifyInstance } from "fastify";
 import type { CatalogPreparationService } from "../../application/catalog/catalog-preparation-service.js";
 import type { CatalogPreparationRepository, CatalogDisposition } from "../../application/catalog/catalog-preparation-repository.js";
 import type { CatalogRepository } from "../../application/catalog/catalog-repository.js";
+import type { CatalogSource } from "../../application/catalog-sources/catalog-source.js";
 import { commandMetadata as metadata, localCommissioner as actor } from "../command-metadata.js";
 
-export async function registerCatalogRoutes(server: FastifyInstance, service: CatalogPreparationService, repository: CatalogPreparationRepository & CatalogRepository) {
+export async function registerCatalogRoutes(server: FastifyInstance, service: CatalogPreparationService, repository: CatalogPreparationRepository & CatalogRepository, sleeperSource?: CatalogSource) {
   server.get<{ Params: { seasonId: string } }>("/api/catalog/:seasonId/players", request => repository.catalogPlayers(actor, request.params.seasonId));
   server.post<{ Params: { seasonId: string }; Body: { sourceNamespace: string; format: "csv" | "json"; content: string } }>("/api/catalog/:seasonId/preparations", async request => {
     const command = metadata(request, request.params.seasonId, "STAGE_CATALOG");
     try { return await service.stage(command, { sourceNamespace: request.body.sourceNamespace, format: request.body.format, bytes: Buffer.from(request.body.content, "utf8") }); }
     catch (error) { const rejected = error as Error & { statusCode?: number }; rejected.statusCode ??= 400; throw rejected; }
+  });
+  server.post<{ Params: { seasonId: string } }>("/api/catalog/:seasonId/preparations/sleeper", async request => {
+    if (!sleeperSource) throw Object.assign(new Error("Sleeper preparation source is unavailable"), { statusCode: 503 });
+    const command = metadata(request, request.params.seasonId, "STAGE_SLEEPER_CATALOG");
+    const controller = new AbortController();
+    request.raw.once("aborted", () => controller.abort());
+    try { return await service.stageFromSource(command, sleeperSource, { signal: controller.signal }); }
+    catch (error) { const rejected = error as Error & { statusCode?: number }; rejected.statusCode ??= 502; throw rejected; }
   });
   server.get<{ Params: { seasonId: string; batchId: string } }>("/api/catalog/:seasonId/preparations/:batchId", request =>
     repository.catalogPreparation(actor, request.params.seasonId, request.params.batchId));
