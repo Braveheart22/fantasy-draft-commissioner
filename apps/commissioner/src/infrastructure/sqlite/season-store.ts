@@ -14,7 +14,7 @@ import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRou
 import type { AuctionEngineResult, CommissionerAuctionInput } from "../../application/ports/auction-engine.js";
 import type { ActorDescriptor, CommandMetadata, SeasonRecord, SeasonRepository, SeasonTransaction } from "../../application/ports/season-repository.js";
 import { LifecycleState } from "../../application/ports/season-repository.js";
-import { PLAYER_POSITIONS, type ImportPreview, type ImportRow, type PlayerInput, type SetupRepository, type SetupSummary, type TeamInput } from "../../application/setup/setup-repository.js";
+import { PLAYER_POSITIONS, type ImportPreview, type ImportRow, type KeeperStagePlayer, type KeeperStageSummary, type PlayerInput, type SetupRepository, type SetupSummary, type TeamInput } from "../../application/setup/setup-repository.js";
 import type { DraftOrderDecision, DraftOrderRepository, DraftOrderSummary } from "../../application/draft-order/draft-order-repository.js";
 import type { ConventionalDraftRepository, DraftPickInput } from "../../application/conventional-draft/conventional-draft-repository.js";
 import { canAddPlayerThroughPhase1, validateRosterThroughPhase1 } from "../../integrations/roster-validator-adapter.js";
@@ -145,7 +145,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const setup: SetupSummary = {
         season,
         teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })),
-        players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return { id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available }; }),
+        players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return { id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available, keeperEligible: player.keeperEligible }; }),
         floors: floorMap,
       };
       const auctionSummary = async (round: typeof rounds[number]): Promise<AuctionRoundSummary> => {
@@ -512,6 +512,8 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       if (playerId) {
         const player = await requireSelectablePlayer(database, metadata.seasonId, playerId);
         if (!player.keeperEligible) throw new Error("Keeper player is unavailable");
+        const existing = await database.keeperSelection.findFirst({ where: { seasonId: metadata.seasonId, playerId, seasonTeamId: { not: seasonTeamId } }, include: { seasonTeam: true } });
+        if (existing) throw new Error(`Keeper player is already selected by ${existing.seasonTeam.displayName}`);
         await database.keeperSelection.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, seasonTeamId, playerId, cost: 50, startingBudget: 300 } });
       }
       await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
@@ -535,6 +537,13 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     if (await this.prisma.pricePreparationBatch.count({ where: { seasonId: metadata.seasonId, state: "STAGED" } })) throw new Error("Price-list review must be resolved before keeper lock");
     if (!Number.isInteger(rosterCapacity) || rosterCapacity < 1) throw new Error("Roster capacity must be positive");
     const summary = await this.setupSummary(metadata.actor, metadata.seasonId);
+    const playersById = new Map(summary.players.map(player => [player.id, player]));
+    const invalidKeeper = summary.teams.some(team => {
+      if (!team.keeperPlayerId) return false;
+      const player = playersById.get(team.keeperPlayerId);
+      return !player || !player.available || !player.keeperEligible || player.minimumBid === undefined;
+    });
+    if (invalidKeeper) throw new Error("Invalid keeper selection must be changed or cleared before keeper lock");
     if (summary.teams.length !== summary.season.teamCount) throw new Error("Participating team count is incomplete");
     for (const player of summary.players) if (player.minimumBid === undefined) throw new Error(`Missing positional floor for ${player.position}`);
     if (summary.teams.some(team => team.keeperPlayerId && rosterCapacity < 1)) throw new Error("Keeper exceeds roster capacity");
@@ -562,7 +571,100 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       this.prisma.positionPriceFloor.findMany({ where: { seasonId } }),
     ]);
     const floorMap = Object.fromEntries(floors.map(floor => [floor.position, floor.minimumBid]));
-    return { season, teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })), players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return ({ id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available }); }), floors: floorMap };
+    return { season, teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })), players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return ({ id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available, keeperEligible: player.keeperEligible }); }), floors: floorMap };
+  }
+
+  async keeperSummary(actor: ActorDescriptor, seasonId: string): Promise<KeeperStageSummary> {
+    const season = await this.getSeason(actor, seasonId);
+    if (!season) throw new Error(`Season not found: ${seasonId}`);
+    const [teams, floors, unresolvedPriceReviewCount] = await Promise.all([
+      this.prisma.seasonTeam.findMany({ where: { seasonId }, include: { keeper: true }, orderBy: { seedOrder: "asc" } }),
+      this.prisma.positionPriceFloor.findMany({ where: { seasonId } }),
+      this.prisma.pricePreparationBatch.count({ where: { seasonId, state: "STAGED" } }),
+    ]);
+    const selectedPlayerIds = teams.flatMap(team => team.keeper ? [team.keeper.playerId] : []);
+    const players = await this.prisma.player.findMany({
+      where: { seasonId, OR: [{ keeperEligible: true }, { id: { in: selectedPlayerIds } }] },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+    const playerIds = players.map(player => player.id);
+    const floorMap = new Map(floors.map(floor => [floor.position, floor.minimumBid]));
+    const [priceAssignments, rosterAssignments, missingPriceCount] = await Promise.all([
+      this.prisma.playerPriceAssignment.findMany({ where: { seasonId, playerId: { in: playerIds }, active: true }, orderBy: { createdAt: "desc" } }),
+      this.prisma.rosterAssignment.findMany({ where: { seasonId, playerId: { in: playerIds }, supersededAt: null }, select: { playerId: true } }),
+      this.prisma.player.count({ where: { seasonId, explicitMinimumBid: null, position: { notIn: [...floorMap.keys()] } } }),
+    ]);
+    const assignmentsByPlayer = new Map<string, typeof priceAssignments>();
+    for (const assignment of priceAssignments) {
+      const assignments = assignmentsByPlayer.get(assignment.playerId) ?? [];
+      assignments.push(assignment);
+      assignmentsByPlayer.set(assignment.playerId, assignments);
+    }
+    const ownedPlayerIds = new Set(rosterAssignments.map(assignment => assignment.playerId));
+    const locked = season.state !== LifecycleState.SETUP;
+    const historicalKeeperIds = new Set(selectedPlayerIds);
+    const stagePlayers = new Map(players.map(player => {
+      const assignments = assignmentsByPlayer.get(player.id) ?? [];
+      const price = assignments.find(item => item.sourceType === "MANUAL")
+        ?? assignments.find(item => item.sourceType === "LIST")
+        ?? assignments.find(item => item.sourceType === "LEGACY");
+      const floor = floorMap.get(player.position);
+      const minimumBid = price?.minimumBid ?? floor;
+      const availability = deriveAvailability({ owned: ownedPlayerIds.has(player.id), leagueSelectable: player.leagueSelectable, providerActive: player.providerActive });
+      const stagePlayer: KeeperStagePlayer = {
+        id: player.id,
+        name: player.name,
+        position: player.position,
+        ...(player.nflTeam ? { nflTeam: player.nflTeam } : {}),
+        sourceType: player.sourceType as KeeperStagePlayer["sourceType"],
+        providerActive: player.providerActive,
+        leagueSelectable: player.leagueSelectable,
+        keeperEligible: player.keeperEligible,
+        available: availability.available,
+        availabilityReason: availability.reason,
+        ...(minimumBid === undefined ? {} : { minimumBid }),
+        priceSourceLabel: price?.sourceLabel ?? (floor === undefined ? "Missing price" : `${player.position} floor`),
+        valid: (locked && historicalKeeperIds.has(player.id)) || (player.keeperEligible && availability.available && minimumBid !== undefined),
+      };
+      return [player.id, stagePlayer] as const;
+    }));
+    const toStagePlayer = (playerId: string): KeeperStagePlayer => {
+      const player = stagePlayers.get(playerId);
+      if (!player) throw new Error(`Selected keeper is missing from the season catalog: ${playerId}`);
+      return {
+        ...player,
+      };
+    };
+    const teamSummaries = teams.map(team => {
+      const selected = team.keeper ? toStagePlayer(team.keeper.playerId) : undefined;
+      return {
+        id: team.teamId,
+        seasonTeamId: team.id,
+        displayName: team.displayName,
+        seedOrder: team.seedOrder,
+        keeperCost: selected ? 50 as const : 0 as const,
+        startingBudget: selected ? 300 as const : 350 as const,
+        ...(selected ? { selectedPlayer: selected } : {}),
+      };
+    });
+    const missingTeamCount = Math.max(0, season.teamCount - teamSummaries.length);
+    const invalidSelectionCount = teamSummaries.filter(team => team.selectedPlayer && !team.selectedPlayer.valid).length;
+    return {
+      season,
+      locked,
+      keeperCost: 50,
+      eligiblePlayers: [...stagePlayers.values()].filter(player => player.keeperEligible),
+      teams: teamSummaries,
+      preflight: {
+        expectedTeamCount: season.teamCount,
+        configuredTeamCount: teamSummaries.length,
+        missingTeamCount,
+        invalidSelectionCount,
+        missingPriceCount,
+        unresolvedPriceReviewCount,
+        canLock: !locked && missingTeamCount === 0 && invalidSelectionCount === 0 && missingPriceCount === 0 && unresolvedPriceReviewCount === 0,
+      },
+    };
   }
 
   async catalogPlayers(_actor: ActorDescriptor, seasonId: string, query: CatalogQuery = {}): Promise<CatalogPlayer[]> {

@@ -18,4 +18,6 @@ code { overflow-wrap: anywhere; }
 .player-finder ul { display: grid; gap: 8px; padding: 0; list-style: none; }
 .player-finder li button { width: 100%; text-align: left; border-radius: 12px; }
 .player-finder :focus-visible { outline: 3px solid #f4cf62; outline-offset: 3px; }
+.keeper-team-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.keeper-team-tabs button[aria-pressed="true"] { background: #16324f; color: white; }
 @media (max-width: 540px) { main { padding: 20px 0; } header, section { padding: 18px; } button { width: 100%; margin: 5px 0; } }

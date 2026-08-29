@@ -21,4 +21,5 @@ export class SetupService {
   selectKeeper(metadata: CommandMetadata, seasonTeamId: string, playerId?: string) { return this.setup.selectKeeper(metadata, seasonTeamId, playerId); }
   async lockKeepers(metadata: CommandMetadata, rosterCapacity: number) { await this.checkpoints?.before(metadata, "PRE_KEEPER_LOCK"); return this.setup.lockKeepers(metadata, rosterCapacity); }
   summary(metadata: Pick<CommandMetadata, "actor" | "seasonId">) { return this.setup.setupSummary(metadata.actor, metadata.seasonId); }
+  keeperSummary(metadata: Pick<CommandMetadata, "actor" | "seasonId">) { return this.setup.keeperSummary(metadata.actor, metadata.seasonId); }
 }
