@@ -27,6 +27,8 @@ import { registerCatalogRoutes } from "../routes/catalog/catalog-routes.js";
 import { registerLocalTrustBoundary } from "./local-trust-boundary.js";
 import { SleeperCatalogAdapter } from "../integrations/sleeper-catalog-adapter.js";
 import type { CatalogSource } from "../application/catalog-sources/catalog-source.js";
+import { PricingService } from "../application/pricing/pricing-service.js";
+import { registerPricingRoutes } from "../routes/pricing/pricing-routes.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -74,6 +76,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   server.get("/health", async () => ({ status: "ok", dataDirectory }));
   await registerBootstrapRoutes(server, new BootstrapService(store));
   await registerCatalogRoutes(server, new CatalogPreparationService(store), store, options.sleeperSource ?? new SleeperCatalogAdapter({ artifactDirectory: join(dataDirectory, "catalog-artifacts") }));
+  await registerPricingRoutes(server, new PricingService(store), store);
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);

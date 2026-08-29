@@ -39,6 +39,8 @@ model Season {
   importBatches PlayerImportBatch[]
   catalogSnapshots CatalogSnapshot[]
   catalogPreparationBatches CatalogPreparationBatch[]
+  pricePreparationBatches PricePreparationBatch[]
+  priceAssignments PlayerPriceAssignment[]
   playerAliases PlayerSourceAlias[]
   priceFloors PositionPriceFloor[]
   keepers KeeperSelection[]
@@ -166,6 +168,7 @@ model Player {
   updatedAt DateTime @updatedAt
   keeper KeeperSelection?
   aliases PlayerSourceAlias[]
+  priceAssignments PlayerPriceAssignment[]
   catalogSnapshot CatalogSnapshot? @relation(fields: [catalogSnapshotId], references: [id])
   @@unique([seasonId, sourceType, sourceNamespace, externalId])
   @@index([seasonId, normalizedSearchText])
@@ -262,6 +265,61 @@ model PositionPriceFloor {
   position String
   minimumBid Int
   @@unique([seasonId, position])
+}
+model PricePreparationBatch {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceLabel String
+  format String
+  sourceHash String
+  normalizedHash String
+  expectedSeasonVersion Int
+  state String
+  rowCount Int
+  createdAt DateTime @default(now())
+  approvedAt DateTime?
+  supersededAt DateTime?
+  rows PricePreparationRow[]
+  assignments PlayerPriceAssignment[]
+  @@unique([seasonId, sourceHash])
+  @@index([seasonId, state, createdAt])
+}
+model PricePreparationRow {
+  id String @id
+  batchId String
+  batch PricePreparationBatch @relation(fields: [batchId], references: [id])
+  rowNumber Int
+  sourceNamespace String?
+  sourceId String?
+  name String
+  nflTeam String?
+  position String
+  minimumBid Int
+  matchKind String
+  matchedPlayerId String?
+  reviewMessage String?
+  disposition String?
+  resolutionPlayerId String?
+  @@unique([batchId, rowNumber])
+  @@index([batchId, matchKind, disposition])
+}
+model PlayerPriceAssignment {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  playerId String
+  player Player @relation(fields: [playerId], references: [id])
+  minimumBid Int
+  sourceType String
+  sourceLabel String
+  sourceBatchId String?
+  sourceBatch PricePreparationBatch? @relation(fields: [sourceBatchId], references: [id])
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  @@index([seasonId, playerId, active, sourceType])
+  @@index([sourceBatchId])
 }
 model KeeperSelection {
   id String @id

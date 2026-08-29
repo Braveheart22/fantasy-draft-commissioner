@@ -40,3 +40,23 @@ test("canonical catalog review survives the normal setup flow through keeper loc
   await expect(page.getByText("Alpha: $350")).toBeVisible();
   await expect(page.getByText("Beta: $300")).toBeVisible();
 });
+
+test("commissioner stages, resolves, and approves a durable price list", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create two-team season" }).click();
+  await expect(page.getByText("Saved")).toBeVisible();
+  await page.getByRole("button", { name: "Add Eddie Gallagher" }).click();
+  await expect(page.getByText("Eddie Gallagher (K) — missing")).toBeVisible();
+  await page.getByLabel("Price-list file").setInputFiles({
+    name: "prices.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify([{ name: "Eddie Gallagher", position: "K", minimumBid: 7 }])),
+  });
+  await page.getByRole("button", { name: "Stage price-list preview" }).click();
+  await expect(page.getByText("Staged 1 prices; 1 need review.")).toBeVisible();
+  await page.getByLabel("Resolve price player").selectOption({ label: "Eddie Gallagher (K)" });
+  await expect(page.getByText("All rows are matched and ready for approval.")).toBeVisible();
+  await page.getByRole("button", { name: "Approve price list" }).click();
+  await expect(page.getByText("Price list approved for offline draft-night use.")).toBeVisible();
+  await expect(page.getByText("Eddie Gallagher (K) — $7 · commissioner-price-list")).toBeVisible();
+});

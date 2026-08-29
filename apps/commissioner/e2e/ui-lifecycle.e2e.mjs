@@ -64,7 +64,7 @@ test("commissioner UI completes both rounds, order, fixed draft, recovery, and e
     }
   }
   await page.getByRole("button", { name: "Show recovery summary" }).click();
-  await expect(page.getByText("Database integrity: ok; schema 8.")).toBeVisible();
+  await expect(page.getByText("Database integrity: ok; schema 9.")).toBeVisible();
   await page.getByRole("button", { name: "Create CSV & JSON" }).click();
   await expect(page.getByText("Export complete")).toBeVisible();
   await expect(page.getByText(/final-rosters\.json/)).toBeVisible();
