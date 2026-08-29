@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { assertLifecycleTransition } from "../../application/commands/lifecycle.js";
-import type { CatalogPlayer, CatalogQuery, CatalogRepository } from "../../application/catalog/catalog-repository.js";
+import type { CatalogPlayer, CatalogQuery, CatalogRepository, PlayerSearchPage, PlayerSearchQuery } from "../../application/catalog/catalog-repository.js";
 import type { CatalogDisposition, CatalogPreparationRepository, CatalogPreparationView, CatalogReviewKind } from "../../application/catalog/catalog-preparation-repository.js";
 import type { CatalogNormalizationResult, CanonicalCatalogRow } from "../../application/catalog-sources/canonical-catalog-normalizer.js";
 import type { CanonicalCatalogFormat } from "../../application/catalog-sources/catalog-source.js";
@@ -585,12 +585,111 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       return [{
         id: row.id, name: row.name, position: row.position,
         ...(row.nflTeam ? { nflTeam: row.nflTeam } : {}), sourceType: row.sourceType,
-        providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable,
+        providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable, keeperEligible: row.keeperEligible,
         normalizedSearchText: row.normalizedSearchText, ...(row.sourceUpdatedAt ? { sourceUpdatedAt: row.sourceUpdatedAt } : {}),
         aliases: row.aliases.map(alias => ({ sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId })),
         owned: ownedIds.has(row.id), ...availability,
       }];
     });
+  }
+
+  async searchCatalogPlayers(_actor: ActorDescriptor, seasonId: string, query: PlayerSearchQuery = {}): Promise<PlayerSearchPage> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 25;
+    if (!Number.isSafeInteger(page) || page < 1) throw Object.assign(new Error("Page must be a positive integer"), { statusCode: 400 });
+    if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw Object.assign(new Error("Page size must be between 1 and 100"), { statusCode: 400 });
+
+    const where: Record<string, unknown> = { seasonId };
+    if (query.search) where.normalizedSearchText = { contains: normalizeSearchText(query.search) };
+    if (query.nflTeam) where.nflTeam = query.nflTeam.toUpperCase();
+    if (query.position) where.position = query.position.toUpperCase();
+    if (query.sourceType) where.sourceType = query.sourceType;
+
+    if (query.availability === "OWNED" || query.availability === "LEAGUE_DISABLED" || query.availability === "CATALOG_INACTIVE") {
+      const assignments = await this.prisma.rosterAssignment.findMany({ where: { seasonId, supersededAt: null }, select: { playerId: true } });
+      const ownedPlayerIds = assignments.map(item => item.playerId);
+      where.id = query.availability === "OWNED" ? { in: ownedPlayerIds } : { notIn: ownedPlayerIds };
+    }
+    if (query.availability === "LEAGUE_DISABLED") {
+      where.leagueSelectable = false;
+    } else if (query.availability === "CATALOG_INACTIVE") {
+      where.leagueSelectable = true;
+      where.providerActive = false;
+    } else if (query.availability === "AVAILABLE" || (!query.availability && !query.includeUnavailable)) {
+      where.available = true;
+      if (query.stagePolicy === "KEEPER") where.keeperEligible = true;
+    }
+
+    const [total, players] = await Promise.all([
+      this.prisma.player.count({ where }),
+      this.prisma.player.findMany({
+        where,
+        include: { aliases: { orderBy: [{ sourceNamespace: "asc" }, { sourceId: "asc" }] } },
+        orderBy: [{ normalizedSearchText: "asc" }, { id: "asc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    if (players.length === 0) return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), items: [] };
+
+    const playerIds = players.map(player => player.id);
+    const positions = [...new Set(players.map(player => player.position))];
+    const [priceAssignments, floors, assignments] = await Promise.all([
+      this.prisma.playerPriceAssignment.findMany({ where: { seasonId, playerId: { in: playerIds }, active: true }, orderBy: { createdAt: "desc" } }),
+      this.prisma.positionPriceFloor.findMany({ where: { seasonId, position: { in: positions } } }),
+      this.prisma.rosterAssignment.findMany({ where: { seasonId, playerId: { in: playerIds }, supersededAt: null } }),
+    ]);
+    const teamIds = [...new Set(assignments.map(item => item.seasonTeamId))];
+    const teams = teamIds.length === 0 ? [] : await this.prisma.seasonTeam.findMany({ where: { seasonId, id: { in: teamIds } } });
+
+    const pricesByPlayer = new Map<string, typeof priceAssignments>();
+    for (const assignment of priceAssignments) {
+      const prices = pricesByPlayer.get(assignment.playerId) ?? [];
+      prices.push(assignment);
+      pricesByPlayer.set(assignment.playerId, prices);
+    }
+    const floorMap = new Map(floors.map(floor => [floor.position, floor.minimumBid]));
+    const teamNames = new Map(teams.map(team => [team.id, team.displayName]));
+    const owners = new Map(assignments.map(item => [item.playerId, teamNames.get(item.seasonTeamId) ?? "Owned"]));
+
+    const items = players.map(player => {
+      const prices = pricesByPlayer.get(player.id) ?? [];
+      const price = prices.find(item => item.sourceType === "MANUAL")
+        ?? prices.find(item => item.sourceType === "LIST")
+        ?? prices.find(item => item.sourceType === "LEGACY");
+      const floor = floorMap.get(player.position);
+      const availability = deriveAvailability({ owned: owners.has(player.id), leagueSelectable: player.leagueSelectable, providerActive: player.providerActive });
+      const stageAllowed = query.stagePolicy === "KEEPER"
+        ? availability.available && player.keeperEligible
+        : query.stagePolicy === "SETUP" ? !owners.has(player.id) : availability.available;
+      const priceContext = price
+        ? { minimumBid: price.minimumBid, priceSource: price.sourceType as "MANUAL" | "LIST" | "LEGACY", priceSourceLabel: price.sourceLabel }
+        : floor !== undefined
+          ? { minimumBid: floor, priceSource: "FLOOR" as const, priceSourceLabel: `${player.position} floor` }
+          : { priceSource: "MISSING" as const, priceSourceLabel: "Missing price" };
+
+      return {
+        id: player.id,
+        name: player.name,
+        position: player.position,
+        ...(player.nflTeam ? { nflTeam: player.nflTeam } : {}),
+        sourceType: player.sourceType,
+        providerStatus: player.providerStatus,
+        providerActive: player.providerActive,
+        leagueSelectable: player.leagueSelectable,
+        keeperEligible: player.keeperEligible,
+        normalizedSearchText: player.normalizedSearchText,
+        ...(player.sourceUpdatedAt ? { sourceUpdatedAt: player.sourceUpdatedAt } : {}),
+        aliases: player.aliases.map(alias => ({ sourceNamespace: alias.sourceNamespace, sourceId: alias.sourceId })),
+        owned: owners.has(player.id),
+        ...availability,
+        ...priceContext,
+        ...(owners.has(player.id) ? { ownerLabel: owners.get(player.id)! } : {}),
+        availabilityReason: availability.reason,
+        stageAllowed,
+      };
+    });
+    return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), items };
   }
 
   async assertAvailabilityConsistency(seasonId: string): Promise<void> {

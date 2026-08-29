@@ -23,14 +23,14 @@ describe("setup HTTP delivery", () => {
     const tabOne = await fetch(`${base}/api/setup/s/teams`, { method: "PUT", headers: { "content-type": "application/json", "idempotency-key": "teams-tab-one", "x-expected-season-version": "0" }, body });
     expect(tabOne.status).toBe(200);
     const staleTab = await fetch(`${base}/api/setup/s/teams`, { method: "PUT", headers: { "content-type": "application/json", "idempotency-key": "teams-tab-two", "x-expected-season-version": "0" }, body });
-    expect(staleTab.status).toBe(500);
-    expect(await staleTab.text()).toContain("Stale season version");
+    expect(staleTab.status).toBe(409);
+    expect(await staleTab.json()).toMatchObject({ code: "STALE_VERSION", message: expect.stringContaining("Stale season version") });
     const backupHeaders = { "content-type": "application/json", "idempotency-key": "manual-backup", "x-expected-season-version": "1" };
     const backup = await fetch(`${base}/api/operations/backups`, { method: "POST", headers: backupHeaders, body: JSON.stringify({ seasonId: "s" }) });
     expect(backup.status).toBe(200); const receipt = await backup.json(); expect(receipt.backupId).toBeTruthy();
     const retry = await fetch(`${base}/api/operations/backups`, { method: "POST", headers: backupHeaders, body: JSON.stringify({ seasonId: "s" }) });
     expect(await retry.json()).toMatchObject({ backupId: receipt.backupId, sha256: receipt.sha256 });
     const staleBackup = await fetch(`${base}/api/operations/backups`, { method: "POST", headers: { ...backupHeaders, "idempotency-key": "stale-backup", "x-expected-season-version": "0" }, body: JSON.stringify({ seasonId: "s" }) });
-    expect(staleBackup.status).toBe(500);
+    expect(staleBackup.status).toBe(409);
   });
 });

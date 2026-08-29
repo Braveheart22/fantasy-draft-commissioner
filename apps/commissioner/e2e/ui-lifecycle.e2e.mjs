@@ -34,6 +34,7 @@ async function load(page, seasonId) {
 }
 
 async function act(page,button){await button.click();await page.waitForFunction(()=>document.querySelector("fieldset")?.disabled===true);await page.waitForFunction(()=>document.querySelector("fieldset")?.disabled===false);}
+async function selectPlayer(page,label,name){await page.getByLabel(`${label} search`).fill(name);await page.getByRole("button",{name:"Search players"}).click();await page.getByRole("button",{name:new RegExp(`^${name} ·`)}).click();}
 
 async function zeroBidRound(page, round) {
   await act(page,page.getByRole("button", { name: `Open round ${round}` }));
@@ -59,7 +60,7 @@ test("commissioner UI completes both rounds, order, fixed draft, recovery, and e
   const teamIndex = new Map(setup.teams.map((team, index) => [team.seasonTeamId, index]));
   for (let round = 0; round < 14; round++) {
     for (const entry of draft.order) {
-      await page.getByLabel("Available player ID").fill(`${seasonId}-p${teamIndex.get(entry.seasonTeamId) * 14 + round}`);
+      await selectPlayer(page,"Available player",`Player ${teamIndex.get(entry.seasonTeamId) * 14 + round}`);
       await act(page,page.getByRole("button", { name: "Commit legal pick" }));
     }
   }
@@ -75,7 +76,7 @@ test("commissioner UI records an auction tie and confirms an audited correction"
   await seedLockedSeason(request, seasonId, 1);
   await load(page, seasonId);
   await act(page,page.getByRole("button", { name: "Open round 1" }));
-  await page.getByLabel("Bid player ID").fill(`${seasonId}-p0`);
+  await selectPlayer(page,"Bid player","Player 0");
   await act(page,page.getByRole("button", { name: "Finalize bid for Alpha" }));
   await act(page,page.getByRole("button", { name: "Finalize bid for Beta" }));
   await act(page,page.getByRole("button", { name: "Lock, resolve & reveal round 1" }));
@@ -94,6 +95,62 @@ test("commissioner UI records an auction tie and confirms an audited correction"
   await expect(page.getByText(/Restore is intentionally unavailable/)).toBeVisible();
 });
 
+test("player finder keeps filters and keyboard selection bounded on a large catalog", async ({ page, request }) => {
+  const seasonId = `ui-finder-${Date.now()}`;
+  await seedLockedSeason(request, seasonId, 1);
+  const searchRequests = [];
+  await page.route(`**/api/catalog/${seasonId}/search?*`, async route => {
+    const url = new URL(route.request().url());
+    searchRequests.push(url.search);
+    const pageNumber = Number(url.searchParams.get("page") ?? 1);
+    const items = Array.from({ length: 25 }, (_, index) => ({
+      id: `large-${pageNumber}-${index}`,
+      name: `Large Player ${pageNumber}-${index}`,
+      position: "WR",
+      nflTeam: "MIN",
+      sourceType: "NFL",
+      providerStatus: "ACTIVE",
+      providerActive: true,
+      leagueSelectable: true,
+      keeperEligible: false,
+      normalizedSearchText: `large player ${pageNumber} ${index}`,
+      aliases: [],
+      owned: false,
+      available: true,
+      reason: "AVAILABLE",
+      availabilityReason: "AVAILABLE",
+      stageAllowed: true,
+      minimumBid: 1,
+      priceSource: "FLOOR",
+      priceSourceLabel: "WR floor",
+    }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ page: pageNumber, pageSize: 25, total: 2500, totalPages: 100, items }) });
+  });
+  await load(page, seasonId);
+  await act(page,page.getByRole("button", { name: "Open round 1" }));
+
+  await page.getByLabel("Bid player search").fill("large");
+  await page.getByLabel("Position").selectOption("WR");
+  await page.getByLabel("NFL team").fill("MIN");
+  await page.getByLabel("Source").selectOption("NFL");
+  await page.getByLabel("Bid player search").press("Enter");
+  await expect(page.getByText("2500 players found.")).toBeVisible();
+  await expect(page.locator(".player-finder li button")).toHaveCount(25);
+  const firstResult = page.getByRole("button", { name: /^Large Player 1-0 ·/ });
+  await firstResult.focus();
+  await firstResult.press("Enter");
+  await expect(firstResult).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Next players" }).click();
+  await expect(page.getByText("Page 2 of 100")).toBeVisible();
+  await expect(page.getByLabel("Bid player search")).toHaveValue("large");
+  await expect(page.getByLabel("Position")).toHaveValue("WR");
+  await expect(page.getByLabel("NFL team")).toHaveValue("MIN");
+  await expect(page.getByLabel("Source")).toHaveValue("NFL");
+  expect(searchRequests.at(-1)).toContain("search=large");
+  expect(searchRequests.at(-1)).toContain("nflTeam=MIN");
+  expect(searchRequests.at(-1)).toContain("sourceType=NFL");
+});
+
 test("loading another season replaces active staged UI state", async ({ page, request }) => {
   const currentSeasonId = `ui-current-${Date.now()}`;
   const advancedSeasonId = `ui-advanced-${Date.now()}`;
@@ -108,16 +165,16 @@ test("loading another season replaces active staged UI state", async ({ page, re
   await act(page, page.getByRole("button", { name: /Record external order tie/ }));
   await act(page, page.getByRole("button", { name: "Finalize permanent order" }));
   await expect(page.getByText("Pick 1:", { exact: false })).toBeVisible();
-  await expect(page.getByLabel("Bid player ID")).toHaveCount(0);
-  await page.getByLabel("Available player ID").fill(`${advancedSeasonId}-stale-pick`);
+  await expect(page.getByLabel("Bid player search")).toHaveCount(0);
+  await selectPlayer(page,"Available player","Player 0");
 
   await page.getByLabel("Existing season ID").fill(currentSeasonId);
   await act(page, page.getByRole("button", { name: "Load season" }));
 
   await expect(page.getByRole("heading", { name: "Auction round 1" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Auction round 2" })).toHaveCount(0);
-  await expect(page.getByLabel("Bid player ID")).toHaveValue("");
-  await expect(page.getByLabel("Available player ID")).toHaveCount(0);
+  await expect(page.getByLabel("Bid player search")).toHaveValue("");
+  await expect(page.getByLabel("Available player search")).toHaveCount(0);
   await expect(page.getByText("Pick 1:", { exact: false })).toHaveCount(0);
 });
 

@@ -17,7 +17,7 @@ export function createApiClient(fetcher = fetch) {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message ?? "Request failed");
+      if (!response.ok) { const error = new Error(data.message ?? "Request failed"); error.code = data.code ?? "REQUEST_FAILED"; error.statusCode = response.status; throw error; }
       if (method !== "GET" && data?.season?.rowVersion !== undefined) version = data.season.rowVersion;
       else if (!creating && method !== "GET") {
         const parts = path.split("?")[0].split("/");

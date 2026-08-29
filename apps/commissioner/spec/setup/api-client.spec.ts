@@ -46,4 +46,6 @@ describe("season activation client", () => {
     expect(activation.current().season).toMatchObject({ id: "s", rowVersion: 3 });
     expect(client.expectedVersion()).toBe(3);
   });
+
+  it("retains stable server error codes for inline stage feedback",async()=>{const client=createApiClient(vi.fn(()=>response({message:"Player is unavailable",code:"PLAYER_UNAVAILABLE"},false)) as never);await expect(client.request("/api/catalog/s/search")).rejects.toMatchObject({message:"Player is unavailable",code:"PLAYER_UNAVAILABLE"});});
 });

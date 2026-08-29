@@ -29,6 +29,7 @@ import { SleeperCatalogAdapter } from "../integrations/sleeper-catalog-adapter.j
 import type { CatalogSource } from "../application/catalog-sources/catalog-source.js";
 import { PricingService } from "../application/pricing/pricing-service.js";
 import { registerPricingRoutes } from "../routes/pricing/pricing-routes.js";
+import { registerErrorEnvelope } from "../routes/error-envelope.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -64,6 +65,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const dataDirectory = options.dataDirectory ?? resolveDataDirectory();
   await mkdir(dataDirectory, { recursive: true });
   const server = Fastify({ logger: false });
+  registerErrorEnvelope(server);
   registerLocalTrustBoundary(server);
   const databasePath = join(dataDirectory, "commissioner.db");
   const store = await openSeasonStore(databasePath);
