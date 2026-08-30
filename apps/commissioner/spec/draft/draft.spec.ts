@@ -27,6 +27,23 @@ describe("permanent draft order", () => {
 });
 
 describe("fixed-order conventional drafting", () => {
+  it("returns clock, canonical rosters, informative needs, and reverse pick history", async () => {
+    const { store, seasonId } = await seeded([120, 110]);
+    const order = await store.calculate(command(seasonId, "CALC-CONTROL"));
+    const alpha = order.order[0]!.seasonTeamId;
+    const beta = order.order[1]!.seasonTeamId;
+    const first = await store.makePick(command(seasonId, "CONTROL-P1"), { seasonTeamId: alpha, playerId: "p-0", rosterRules: rules });
+    expect(first.currentSeasonTeamId).toBe(beta);
+    expect(first.currentRound).toBe(1);
+    expect(first.filledRosterSlots).toBe(1);
+    expect(first.totalRosterSlots).toBe(28);
+    expect(first.history.map(item => item.playerName)).toEqual(["Player 0"]);
+    expect(first.teams.find(team => team.seasonTeamId === alpha)?.roster.map(item => item.playerName)).toEqual(["Player 0"]);
+    expect(first.teams.find(team => team.seasonTeamId === alpha)?.positionCounts.QB).toBe(1);
+    expect(first.teams.find(team => team.seasonTeamId === alpha)?.openSlots).toBe(13);
+    expect(first.teams.find(team => team.seasonTeamId === alpha)?.legalNextPositions).toContain("RB");
+    await store.close();
+  });
   it("uses the unchanged Phase 1 limits and one shared FLEX for partial rosters", async () => { const { store, seasonId } = await seeded([120], 28); const order = await store.calculate(command(seasonId, "CALC")); const team = order.order[0]!.seasonTeamId; for (const id of ["p-0", "p-1"]) await store.makePick(command(seasonId, `P-${id}`), { seasonTeamId: team, playerId: id, rosterRules: rules }); await expect(store.makePick(command(seasonId, "QB-OVER"), { seasonTeamId: team, playerId: "p-14", rosterRules: rules })).rejects.toThrow("ROSTER_CAPACITY_EXCEEDED"); for (const id of ["p-2", "p-3", "p-4"]) await store.makePick(command(seasonId, `P-${id}`), { seasonTeamId: team, playerId: id, rosterRules: rules }); await expect(store.makePick(command(seasonId, "FLEX-OVER"), { seasonTeamId: team, playerId: "p-16", rosterRules: rules })).rejects.toThrow("ROSTER_CAPACITY_EXCEEDED"); await store.close(); });
   it("uses A-B-C-A order, rejects wrong/unavailable/overflow picks, and retries idempotently", async () => { const { store, seasonId, teams } = await seeded([120, 110, 100]); const order = await store.calculate(command(seasonId, "CALC")); const a = order.order[0]!.seasonTeamId, b = order.order[1]!.seasonTeamId, c = order.order[2]!.seasonTeamId; await expect(store.makePick(command(seasonId, "WRONG"), { seasonTeamId: b, playerId: "p-0", rosterRules: rules })).rejects.toThrow("on the clock"); let result = await store.makePick(command(seasonId, "P1", "same-pick"), { seasonTeamId: a, playerId: "p-0", rosterRules: rules }); const retry = await store.makePick(command(seasonId, "P1", "same-pick"), { seasonTeamId: a, playerId: "p-0", rosterRules: rules }); expect(retry.nextOverallPick).toBe(result.nextOverallPick); await expect(store.makePick(command(seasonId, "UNAVAILABLE"), { seasonTeamId: b, playerId: "p-0", rosterRules: rules })).rejects.toThrow("unavailable"); result = await store.makePick(command(seasonId, "P2"), { seasonTeamId: b, playerId: "p-1", rosterRules: rules }); result = await store.makePick(command(seasonId, "P3"), { seasonTeamId: c, playerId: "p-2", rosterRules: rules }); expect(result.currentSeasonTeamId).toBe(a); expect(result.nextOverallPick).toBe(4); await store.close(); });
   it("completes only with exactly 14 legal players per team and never snakes", async () => { const { store, seasonId } = await seeded([120, 110]); const order = await store.calculate(command(seasonId, "CALC")); const ids = order.order.map(item => item.seasonTeamId); for (let round = 0; round < 14; round++) for (let position = 0; position < 2; position++) { const overall = round * 2 + position; const result = await store.makePick(command(seasonId, `PICK-${overall}`), { seasonTeamId: ids[position]!, playerId: `p-${position * 14 + round}`, rosterRules: rules }); if (overall < 27) expect(result.currentSeasonTeamId).toBe(ids[(position + 1) % 2]); else expect(result.status).toBe("COMPLETED"); } expect((await store.getSeason(actor, seasonId))!.state).toBe(LifecycleState.COMPLETED); await store.close(); });

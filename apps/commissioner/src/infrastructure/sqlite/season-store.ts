@@ -166,17 +166,23 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const summaries = await Promise.all(rounds.map(auctionSummary));
       let draftSummary: DraftOrderSummary | null = null;
       if (draft) {
-        const [entries, balances, decisions, pickCount] = await Promise.all([
+        const [entries, balances, decisions, pickRows, assignments] = await Promise.all([
           database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }),
           database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }),
           database.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null } }),
-          database.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } }),
+          database.draftPick.findMany({ where: { conventionalDraftId: draft.id, active: true }, orderBy: { overallPick: "desc" } }),
+          database.rosterAssignment.findMany({ where: { seasonId, supersededAt: null } }),
         ]);
         const names = new Map(teams.map(team => [team.id, team.displayName]));
         const decided = new Set(decisions.map(item => item.balance));
         const ties = [...groupBalances(balances)].filter(([balance, group]) => group.length > 1 && !decided.has(balance)).map(([balance, group]) => ({ balance, seasonTeamIds: group.map(item => item.seasonTeamId) }));
+        const pickCount = pickRows.length;
         const current = entries.length ? entries[pickCount % entries.length]?.seasonTeamId : undefined;
-        draftSummary = { rowVersion: season.rowVersion, status: draft.status as DraftOrderSummary["status"], ties, order: entries.map(item => ({ orderPosition: item.orderPosition, seasonTeamId: item.seasonTeamId, displayName: names.get(item.seasonTeamId)!, remainingBalance: item.remainingBalance })), nextOverallPick: pickCount + 1, ...(current && draft.status !== "COMPLETED" ? { currentSeasonTeamId: current } : {}) };
+        const playerById = new Map(players.map(player => [player.id, player]));
+        const pickByPlayerId = new Map(pickRows.map(pick => [pick.playerId, pick]));
+        const rosterRules = { limits: { QB: 2, RB: 2, WR: 3, TE: 2, K: 2, DST: 2 }, flexEligible: ["RB", "WR", "TE"], flexCapacity: 1 };
+        const teamModels = teams.map(team => { const owned = assignments.filter(item => item.seasonTeamId === team.id); const positions = owned.map(item => playerById.get(item.playerId)?.position).filter((position): position is string => Boolean(position)); return { seasonTeamId: team.id, displayName: team.displayName, roster: owned.map(item => { const player = playerById.get(item.playerId)!; const pick = pickByPlayerId.get(item.playerId); return { playerId: player.id, playerName: player.name, position: player.position, acquisitionSource: item.acquisitionSource, ...(item.cost === null ? {} : { cost: item.cost }), ...(item.auctionRound === null ? {} : { auctionRound: item.auctionRound }), ...(pick ? { overallPick: pick.overallPick } : {}) }; }), positionCounts: Object.fromEntries(PLAYER_POSITIONS.map(position => [position, positions.filter(value => value === position).length])), openSlots: Math.max(0, 14 - owned.length), legalNextPositions: PLAYER_POSITIONS.filter(position => canAddPlayerThroughPhase1(positions, position, rosterRules).legal) }; });
+        draftSummary = { rowVersion: season.rowVersion, status: draft.status as DraftOrderSummary["status"], ties, order: entries.map(item => ({ orderPosition: item.orderPosition, seasonTeamId: item.seasonTeamId, displayName: names.get(item.seasonTeamId)!, remainingBalance: item.remainingBalance })), nextOverallPick: pickCount + 1, currentRound: entries.length ? Math.floor(pickCount / entries.length) + 1 : 1, filledRosterSlots: assignments.length, totalRosterSlots: teams.length * 14, teams: teamModels, history: pickRows.map(pick => { const player = playerById.get(pick.playerId)!; return { overallPick: pick.overallPick, roundNumber: pick.roundNumber, orderPosition: pick.orderPosition, seasonTeamId: pick.seasonTeamId, displayName: names.get(pick.seasonTeamId)!, playerId: player.id, playerName: player.name, position: player.position }; }), ...(current && draft.status !== "COMPLETED" ? { currentSeasonTeamId: current } : {}) };
       }
       const teamsReady = teams.length === season.teamCount;
       const catalogReady = players.length > 0;
@@ -1026,7 +1032,32 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   }
 
   async draftSummary(_actor: ActorDescriptor, seasonId: string): Promise<DraftOrderSummary> {
-    const draft = await this.prisma.conventionalDraft.findUniqueOrThrow({ where: { seasonId } }); const [entries, teams, balances, decisions, picks] = await Promise.all([this.prisma.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }), this.prisma.seasonTeam.findMany({ where: { seasonId } }), this.prisma.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }), this.prisma.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id } }), this.prisma.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } })]); const names = new Map(teams.map(team => [team.id, team.displayName])); const decided = new Set(decisions.map(item => item.balance)); const ties = [...groupBalances(balances)].filter(([balance, group]) => group.length > 1 && !decided.has(balance)).map(([balance, group]) => ({ balance, seasonTeamIds: group.map(item => item.seasonTeamId) })); const current = entries.length ? entries[picks % entries.length]?.seasonTeamId : undefined; return { status: draft.status as DraftOrderSummary["status"], ties, order: entries.map(item => ({ orderPosition: item.orderPosition, seasonTeamId: item.seasonTeamId, displayName: names.get(item.seasonTeamId)!, remainingBalance: item.remainingBalance })), nextOverallPick: picks + 1, ...(current && draft.status !== "COMPLETED" ? { currentSeasonTeamId: current } : {}) };
+    const draft = await this.prisma.conventionalDraft.findUniqueOrThrow({ where: { seasonId } });
+    const [entries, teams, balances, decisions, pickRows, assignments, players] = await Promise.all([
+      this.prisma.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }),
+      this.prisma.seasonTeam.findMany({ where: { seasonId, active: true }, orderBy: { seedOrder: "asc" } }),
+      this.prisma.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }),
+      this.prisma.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id } }),
+      this.prisma.draftPick.findMany({ where: { conventionalDraftId: draft.id, active: true }, orderBy: { overallPick: "desc" } }),
+      this.prisma.rosterAssignment.findMany({ where: { seasonId, supersededAt: null } }),
+      this.prisma.player.findMany({ where: { seasonId } }),
+    ]);
+    const names = new Map(teams.map(team => [team.id, team.displayName]));
+    const playerById = new Map(players.map(player => [player.id, player]));
+    const pickByPlayerId = new Map(pickRows.map(pick => [pick.playerId, pick]));
+    const decided = new Set(decisions.map(item => item.balance));
+    const ties = [...groupBalances(balances)].filter(([balance, group]) => group.length > 1 && !decided.has(balance)).map(([balance, group]) => ({ balance, seasonTeamIds: group.map(item => item.seasonTeamId) }));
+    const pickCount = pickRows.length;
+    const current = entries.length ? entries[pickCount % entries.length]?.seasonTeamId : undefined;
+    const rosterRules = { limits: { QB: 2, RB: 2, WR: 3, TE: 2, K: 2, DST: 2 }, flexEligible: ["RB", "WR", "TE"], flexCapacity: 1 };
+    const teamModels = teams.map(team => {
+      const teamAssignments = assignments.filter(item => item.seasonTeamId === team.id);
+      const positions = teamAssignments.map(item => playerById.get(item.playerId)?.position).filter((position): position is string => Boolean(position));
+      const positionCounts = Object.fromEntries(PLAYER_POSITIONS.map(position => [position, positions.filter(value => value === position).length]));
+      const legalNextPositions = PLAYER_POSITIONS.filter(position => canAddPlayerThroughPhase1(positions, position, rosterRules).legal);
+      return { seasonTeamId: team.id, displayName: team.displayName, roster: teamAssignments.map(assignment => { const player = playerById.get(assignment.playerId)!; const pick = pickByPlayerId.get(assignment.playerId); return { playerId: player.id, playerName: player.name, position: player.position, acquisitionSource: assignment.acquisitionSource, ...(assignment.cost === null ? {} : { cost: assignment.cost }), ...(assignment.auctionRound === null ? {} : { auctionRound: assignment.auctionRound }), ...(pick ? { overallPick: pick.overallPick } : {}) }; }), positionCounts, openSlots: Math.max(0, 14 - teamAssignments.length), legalNextPositions };
+    });
+    return { status: draft.status as DraftOrderSummary["status"], ties, order: entries.map(item => ({ orderPosition: item.orderPosition, seasonTeamId: item.seasonTeamId, displayName: names.get(item.seasonTeamId)!, remainingBalance: item.remainingBalance })), nextOverallPick: pickCount + 1, currentRound: entries.length ? Math.floor(pickCount / entries.length) + 1 : 1, filledRosterSlots: assignments.length, totalRosterSlots: teams.length * 14, teams: teamModels, history: pickRows.map(pick => { const player = playerById.get(pick.playerId)!; return { overallPick: pick.overallPick, roundNumber: pick.roundNumber, orderPosition: pick.orderPosition, seasonTeamId: pick.seasonTeamId, displayName: names.get(pick.seasonTeamId)!, playerId: player.id, playerName: player.name, position: player.position }; }), ...(current && draft.status !== "COMPLETED" ? { currentSeasonTeamId: current } : {}) };
   }
 
 

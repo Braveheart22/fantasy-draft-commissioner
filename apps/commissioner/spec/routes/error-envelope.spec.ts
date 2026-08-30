@@ -14,6 +14,9 @@ describe("route error envelope",()=>{
   it.each([
     ["Player is unavailable",409,"PLAYER_UNAVAILABLE"],
     ["Stale season version",409,"STALE_VERSION"],
+    ["Only the team currently on the clock may pick",409,"WRONG_TEAM"],
+    ["Illegal partial roster: ROSTER_CAPACITY_EXCEEDED",409,"ROSTER_CAPACITY_EXCEEDED"],
+    ["Unknown player",409,"UNKNOWN_PLAYER"],
     ["Expected-Season-Version header is required",400,"INVALID_COMMAND_ENVELOPE"],
   ])("infers a safe HTTP status for plain domain error %s",(message,statusCode,code)=>expect(errorEnvelope(new Error(message))).toEqual({statusCode,code,message}));
 });

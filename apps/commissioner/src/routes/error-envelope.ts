@@ -5,14 +5,17 @@ export interface ErrorEnvelope { statusCode:number; code:string; message:string 
 function errorCode(error: Error, statusCode: number): string {
   if (/Idempotency-Key|Expected-Season-Version/i.test(error.message)) return "INVALID_COMMAND_ENVELOPE";
   if (/stale|version/i.test(error.message)) return "STALE_VERSION";
+  if (/currently on the clock/i.test(error.message)) return "WRONG_TEAM";
   if (/unavailable/i.test(error.message)) return "PLAYER_UNAVAILABLE";
+  if (/unknown player/i.test(error.message)) return "UNKNOWN_PLAYER";
+  if (/ROSTER_CAPACITY_EXCEEDED|Illegal partial roster/i.test(error.message)) return "ROSTER_CAPACITY_EXCEEDED";
   return statusCode >= 500 ? "INTERNAL_ERROR" : "COMMAND_REJECTED";
 }
 
 function errorStatus(error: Error & { statusCode?: number }): number {
   if (error.statusCode !== undefined) return error.statusCode;
   if (/Idempotency-Key|Expected-Season-Version/i.test(error.message)) return 400;
-  if (/stale|version|unavailable/i.test(error.message)) return 409;
+  if (/stale|version|unavailable|currently on the clock|unknown player|ROSTER_CAPACITY_EXCEEDED|Illegal partial roster/i.test(error.message)) return 409;
   return 500;
 }
 

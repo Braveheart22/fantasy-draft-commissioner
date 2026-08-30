@@ -172,7 +172,7 @@ test("loading another season replaces active staged UI state", async ({ page, re
   await act(page, page.getByRole("button", { name: "Calculate order from Round 2 balances" }));
   await act(page, page.getByRole("button", { name: /Record external order tie/ }));
   await act(page, page.getByRole("button", { name: "Finalize permanent order" }));
-  await expect(page.getByText("Pick 1:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Round 1 · Overall pick 1", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Priority 1 player search")).toHaveCount(0);
   await selectPlayer(page,"Available player","Player 0");
 
@@ -183,7 +183,7 @@ test("loading another season replaces active staged UI state", async ({ page, re
   await expect(page.getByRole("heading", { name: "Auction round 2" })).toHaveCount(0);
   await expect(page.getByLabel("Priority 1 player search")).toHaveValue("");
   await expect(page.getByLabel("Available player search")).toHaveCount(0);
-  await expect(page.getByText("Pick 1:", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Round 1 · Overall pick 1", { exact: true })).toHaveCount(0);
 });
 
 test("direct future navigation redirects and completed stages expose no normal mutations", async ({ page, request }) => {
