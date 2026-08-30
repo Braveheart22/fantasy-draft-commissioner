@@ -20,3 +20,78 @@ test("both auction rounds lock, reveal, resolve forced tie, resume, publish, and
   for (const team of round2.teams) await send("PUT", `/api/auction/${seasonId}/2/teams/${team.seasonTeamId}`, { bids: [], finalize: true, confirmZero: true });
   expect((await send("POST", `/api/auction/${seasonId}/2/lock`, {})).status).toBe("RESOLVED"); expect((await send("POST", `/api/auction/${seasonId}/2/publish`)).status).toBe("PUBLISHED");
 });
+
+test("commissioner privately saves, rehydrates, finalizes, reveals, and publishes both auction rounds by player name", async ({ page }) => {
+  await page.goto("/");
+  const run = async name => {
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(page.getByText("Saving…")).toBeVisible();
+    await expect(page.getByText("Saved")).toBeVisible();
+  };
+  await run("Create two-team season");
+  await run("Add teams");
+  await run("Add Eddie Gallagher");
+  await run("Set $1 floors");
+  await page.getByLabel("I reviewed every team and confirm keeper lock").check();
+  await page.getByRole("button", { name: "Lock reviewed keepers" }).click();
+  await page.getByRole("button", { name: "Open round 1" }).click();
+  await expect(page.getByRole("heading", { name: "Alpha bid entry" })).toBeVisible();
+
+  await page.getByLabel("Priority 1 player search").fill("Eddie Gallagher");
+  await page.getByLabel("Priority 1 player search").press("Enter");
+  await page.getByLabel("Priority 1 player", { exact: true }).getByRole("button", { name: /^Eddie Gallagher ·/ }).click();
+  await page.getByLabel("Priority 1 amount").fill("10");
+  await page.getByRole("link", { name: "Keepers", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Unsaved bid changes" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alpha bid entry" })).toBeVisible();
+  await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+  await page.getByRole("button", { name: "Beta · DRAFT · 0 bid(s)", exact: true }).click();
+  await page.getByRole("button", { name: "Save draft and continue", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Beta bid entry" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Alpha · DRAFT · 1 bid(s)", exact: true })).toBeVisible();
+  await page.getByLabel("Priority 1 amount").fill("99");
+  await page.getByRole("button", { name: "Alpha · DRAFT · 1 bid(s)", exact: true }).click();
+  await page.getByRole("button", { name: "Discard changes and continue", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Alpha bid entry" })).toBeVisible();
+  const seasonId = await page.getByLabel("Existing season ID").inputValue();
+  await page.reload();
+  await page.getByLabel("Existing season ID").fill(seasonId);
+  await page.getByRole("button", { name: "Load season", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Alpha bid entry" })).toBeVisible();
+  await expect(page.getByText("Eddie Gallagher · K · $1 minimum")).toBeVisible();
+
+  let releaseStaleHydration;
+  let delayNextHydration = true;
+  await page.route("**/submission", async route => {
+    if (!delayNextHydration) return route.continue();
+    delayNextHydration = false;
+    await new Promise(resolve => { releaseStaleHydration = resolve; });
+    await route.abort("failed");
+  });
+  await page.getByRole("button", { name: "Beta · DRAFT · 0 bid(s)", exact: true }).click();
+  await page.getByRole("button", { name: "Alpha · DRAFT · 1 bid(s)", exact: true }).click();
+  await expect(page.getByText("1 saved bid; draft.")).toBeVisible();
+  releaseStaleHydration();
+  await expect(page.getByText("1 saved bid; draft.")).toBeVisible();
+  await page.unroute("**/submission");
+
+  await page.getByRole("button", { name: "Beta · DRAFT · 0 bid(s)", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Beta bid entry" })).toBeVisible();
+  await page.getByRole("button", { name: "Finalize zero bids", exact: true }).click();
+  await page.getByRole("button", { name: "Alpha · DRAFT · 1 bid(s)", exact: true }).click();
+  await expect(page.getByText("Eddie Gallagher · K · $1 minimum")).toBeVisible();
+  await page.getByLabel("Priority 1 amount").fill("25");
+  await page.getByRole("button", { name: "Finalize saved draft", exact: true }).click();
+  await page.getByRole("button", { name: "Lock, resolve & reveal round 1", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Revealed submissions" })).toBeVisible();
+  await expect(page.getByText("Priority 1: Eddie Gallagher · $10")).toBeVisible();
+  await page.getByRole("button", { name: "Publish round 1", exact: true }).click();
+
+  await page.getByRole("button", { name: "Open round 2", exact: true }).click();
+  await page.getByRole("button", { name: "Finalize zero bids", exact: true }).click();
+  await page.getByRole("button", { name: "Beta · DRAFT · 0 bid(s)", exact: true }).click();
+  await page.getByRole("button", { name: "Finalize zero bids", exact: true }).click();
+  await page.getByRole("button", { name: "Lock, resolve & reveal round 2", exact: true }).click();
+  await page.getByRole("button", { name: "Publish round 2", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Draft Order" })).toBeVisible();
+});

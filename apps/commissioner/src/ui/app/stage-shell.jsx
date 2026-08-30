@@ -13,7 +13,7 @@ export function StageShell({ bootstrap, children }) {
   const policy = stageViewPolicy(access);
   return <>
     <nav aria-label="Draft lifecycle">{stages.map(([id, label]) => {
-      return <a key={id} href={`#stage/${id}`} aria-current={id === access.stage ? "page" : undefined}>{label}</a>;
+      return <a key={id} href={`#stage/${id}`} aria-current={id === access.stage ? "page" : undefined} onClick={event => { const request = new CustomEvent("stage-navigation-request", { cancelable: true, detail: { stage: id, href: `stage/${id}` } }); if (!dispatchEvent(request)) event.preventDefault(); }}>{label}</a>;
     })}</nav>
     {access.explanation && <p role="note">{access.explanation}</p>}
     {access.mode === "READ_ONLY" && <a href="#operations">Preview a correction in Operations</a>}

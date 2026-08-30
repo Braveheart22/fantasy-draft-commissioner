@@ -6,13 +6,14 @@ describe("commissioner stage UI control contract", () => {
     const source = (await Promise.all([
       readFile(new URL("../../src/ui/setup/main.jsx", import.meta.url), "utf8"),
       readFile(new URL("../../src/ui/stages/keepers/keepers-panel.jsx", import.meta.url), "utf8"),
+      readFile(new URL("../../src/ui/stages/auction/auction-panel.jsx", import.meta.url), "utf8"),
     ])).join("\n");
     for (const label of [
       "Create two-team season", "Existing season ID", "Load season",
       "Add teams", "Add Eddie Gallagher", "Import sample NFL players", "Set $1 floors",
       "<KeepersPanel", "Lock reviewed keepers",
-      "Open round {roundNumber}", "Bid player", "Finalize zero bids for {team.displayName}",
-      "Finalize bid for {team.displayName}", "Lock, resolve & reveal round {roundNumber}",
+      "Open round {roundNumber}", "Priority ${index + 1} player", "Save draft", "Finalize zero bids",
+      "Finalize saved draft", "Lock, resolve & reveal round {roundNumber}",
       "Record external tie winner", "Publish round {roundNumber}",
       "Calculate order from Round 2 balances", "Record external order tie", "Finalize permanent order",
       "Available player", "Commit legal pick",

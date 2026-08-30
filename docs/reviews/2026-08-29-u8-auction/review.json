@@ -1,0 +1,36 @@
+{
+  "status": "complete",
+  "verdict": "Ready with verification",
+  "scope": {
+    "base": "1f5cfcd",
+    "branch": "feat/phase2.5-draft-night-usability",
+    "head_sha": "1f5cfcd",
+    "pr_url": null,
+    "files_changed": 12
+  },
+  "intent": "Implement Phase 2.5 U8 as a private, name-driven commissioner auction workflow while preserving the frozen auction engine and Phase 2 state machine. Add narrow saved-submission hydration, persisted-draft finalization, dirty-navigation guards, restart behavior, and both-round browser coverage.",
+  "intent_confidence": "explicit",
+  "reviewers": ["correctness", "julik-frontend-races", "testing"],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "U8": "implemented; local service, route, state-machine, privacy, restart, stale-version, and UI contract proofs pass; Playwright rerun remains the final external browser gate"
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": ["Local-only commissioner workflow; validate both auction rounds in Playwright before committing U8."],
+  "residual_risks": ["Obsolete private-read requests are not cancelled, but sequence guards prevent stale success or failure state from committing.", "Future multi-user owner access will require authorization boundaries around the intentionally single-commissioner private read."],
+  "testing_gaps": ["The final Playwright run must execute on the host because browser process spawning is unavailable in the current sandbox."],
+  "coverage": {
+    "phase1": "35 passed",
+    "commissioner_functional": "139 passed; existing catalog performance case passed alone after two full-suite threshold misses under host load",
+    "focused_u8": "25 passed",
+    "typecheck": "passed",
+    "build": "passed",
+    "review_followup": "all five actionable findings fixed; re-review returned no actionable findings"
+  },
+  "artifact_path": "docs/reviews/2026-08-29-u8-auction",
+  "run_id": "2026-08-29-u8-auction"
+}

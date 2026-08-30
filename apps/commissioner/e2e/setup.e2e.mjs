@@ -55,8 +55,10 @@ test("canonical catalog review survives the normal setup flow through keeper loc
   await expect(page.getByText("Justin Jefferson · WR", { exact: false }).first()).toBeVisible();
   await page.getByLabel("I reviewed every team and confirm keeper lock").check();
   await page.getByRole("button", { name: "Lock reviewed keepers" }).click();
-  await expect(page.getByText("Alpha: $350")).toBeVisible();
-  await expect(page.getByText("Beta: $300")).toBeVisible();
+  await page.getByRole("button", { name: "Open round 1", exact: true }).click();
+  await expect(page.getByText("$350 starting budget")).toBeVisible();
+  await page.getByRole("button", { name: "Beta · DRAFT · 0 bid(s)", exact: true }).click();
+  await expect(page.getByText("$300 starting budget")).toBeVisible();
 });
 
 test("commissioner stages, resolves, and approves a durable price list", async ({ page }) => {

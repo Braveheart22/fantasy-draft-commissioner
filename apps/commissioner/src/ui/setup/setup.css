@@ -20,4 +20,7 @@ code { overflow-wrap: anywhere; }
 .player-finder :focus-visible { outline: 3px solid #f4cf62; outline-offset: 3px; }
 .keeper-team-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
 .keeper-team-tabs button[aria-pressed="true"] { background: #16324f; color: white; }
+.auction-team-tabs, [aria-label="Auction team"] { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+[aria-label="Auction team"] button[aria-pressed="true"] { background: #16324f; color: white; }
+[aria-label$=" bid entry"] > section { margin-block: 12px; }
 @media (max-width: 540px) { main { padding: 20px 0; } header, section { padding: 18px; } button { width: 100%; margin: 5px 0; } }

@@ -2,10 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import Fastify from "fastify";
 import { AuctionService } from "../../src/application/auction/auction-service.js";
 import { SetupService } from "../../src/application/setup/setup-service.js";
 import { auctionEngineAdapter } from "../../src/integrations/auction-engine-adapter.js";
 import { openSeasonStore, type PrismaSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
+import { registerErrorEnvelope } from "../../src/routes/error-envelope.js";
+import { registerAuctionRoutes } from "../../src/routes/auction/auction-routes.js";
 
 const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
 const rules = { positionLimits: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 }, flexEligiblePositions: ["RB", "WR", "TE"], flexCapacity: 1 };
@@ -17,8 +20,8 @@ async function fixture(options: { withKeeper?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "commissioner-u4-")); const store = await openSeasonStore(join(directory, "draft.db")); opened.push({ store, directory }); const setup = new SetupService(store, store); const seasonId = `season-${serial}`;
   await setup.createSeason(meta(seasonId, "CREATE"), { seasonId, leagueId: `league-${serial}`, year: 2026, name: "Test", teamCount: 2 });
   await setup.configureTeams(meta(seasonId, "TEAMS"), [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }]);
-  await setup.addCustomPlayer(meta(seasonId, "PLAYER1"), { id: "p1", name: "One", position: "K", sourceType: "LEAGUE_CUSTOM" }); await setup.addCustomPlayer(meta(seasonId, "PLAYER2"), { id: "p2", name: "Two", position: "K", sourceType: "LEAGUE_CUSTOM" });
-  await setup.setPriceFloors(meta(seasonId, "FLOORS"), { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 });
+  await setup.addCustomPlayer(meta(seasonId, "PLAYER1"), { id: "p1", name: "One", position: "K", sourceType: "LEAGUE_CUSTOM" }); await setup.addCustomPlayer(meta(seasonId, "PLAYER2"), { id: "p2", name: "Two", position: "K", sourceType: "LEAGUE_CUSTOM" }); await setup.addCustomPlayer(meta(seasonId, "PLAYER3"), { id: "p3", name: "Three", position: "K", sourceType: "LEAGUE_CUSTOM" });
+  await setup.setPriceFloors(meta(seasonId, "FLOORS"), { QB: 1, RB: 1, WR: 1, TE: 1, K: 5, DST: 1 });
   if (options.withKeeper) {
     const summary = await setup.summary({ actor, seasonId });
     await setup.setKeeperEligibility(meta(seasonId, "KEEPER_ELIGIBILITY"), ["p1"]);
@@ -29,6 +32,92 @@ async function fixture(options: { withKeeper?: boolean } = {}) {
 }
 
 describe("auction orchestration", () => {
+  it("retrieves only the explicitly selected team's saved draft and finalizes the persisted rows", async () => {
+    const { store, seasonId, auction } = await fixture();
+    const openedRound = await auction.open(meta(seasonId, "OPEN_PRIVATE_DRAFT"), 1);
+    const [alpha, beta] = openedRound.teams;
+    await auction.submit(meta(seasonId, "SAVE_ALPHA_DRAFT"), 1, alpha!.seasonTeamId, [
+      { playerId: "p1", amount: 20 },
+      { playerId: "p2", amount: 10 },
+    ]);
+
+    expect(await auction.submission(actor, seasonId, 1, alpha!.seasonTeamId)).toMatchObject({
+      seasonTeamId: alpha!.seasonTeamId,
+      status: "DRAFT",
+      bids: [
+        { priority: 1, playerId: "p1", amount: 20 },
+        { priority: 2, playerId: "p2", amount: 10 },
+      ],
+    });
+    expect(await auction.submission(actor, seasonId, 1, beta!.seasonTeamId)).toMatchObject({ seasonTeamId: beta!.seasonTeamId, bids: [] });
+    expect((await auction.summary(actor, seasonId, 1)).teams.every(team => !("bids" in team))).toBe(true);
+
+    await auction.finalize(meta(seasonId, "FINALIZE_ALPHA"), 1, alpha!.seasonTeamId);
+    expect(await auction.submission(actor, seasonId, 1, alpha!.seasonTeamId)).toMatchObject({ status: "FINAL", bidCount: 2 });
+  });
+
+  it("persists all three bids in commissioner priority order and rejects duplicate players", async () => {
+    const { seasonId, auction } = await fixture();
+    const openedRound = await auction.open(meta(seasonId, "OPEN_ORDERED_DRAFT"), 1);
+    const alpha = openedRound.teams[0]!;
+    await auction.submit(meta(seasonId, "SAVE_THREE_BIDS"), 1, alpha.seasonTeamId, [
+      { playerId: "p3", amount: 30 },
+      { playerId: "p1", amount: 20 },
+      { playerId: "p2", amount: 10 },
+    ]);
+    expect((await auction.submission(actor, seasonId, 1, alpha.seasonTeamId)).bids.map(bid => bid.playerId)).toEqual(["p3", "p1", "p2"]);
+    await expect(auction.submit(meta(seasonId, "DUPLICATE_PLAYER"), 1, alpha.seasonTeamId, [
+      { playerId: "p1", amount: 20 },
+      { playerId: "p1", amount: 10 },
+    ])).rejects.toThrow(/same player twice/i);
+  });
+
+  it("requires explicit zero confirmation and rejects finalizing an empty persisted draft", async () => {
+    const { seasonId, auction } = await fixture();
+    const openedRound = await auction.open(meta(seasonId, "OPEN_ZERO_DRAFT"), 1);
+    const alpha = openedRound.teams[0]!;
+    await expect(auction.finalize(meta(seasonId, "FINALIZE_EMPTY"), 1, alpha.seasonTeamId)).rejects.toThrow(/zero bids require confirmation/i);
+    await auction.finalize(meta(seasonId, "FINALIZE_ZERO"), 1, alpha.seasonTeamId, { confirmZero: true });
+    expect(await auction.submission(actor, seasonId, 1, alpha.seasonTeamId)).toMatchObject({ status: "FINAL", bidCount: 0, zeroConfirmed: true });
+  });
+
+  it("rejects bids below the canonical minimum, above the team budget, and edits after finalization", async () => {
+    const { store, seasonId, auction } = await fixture();
+    const openedRound = await auction.open(meta(seasonId, "OPEN_VALIDATION"), 1);
+    const alpha = openedRound.teams[0]!;
+    await expect(auction.submit(meta(seasonId, "BELOW_MINIMUM"), 1, alpha.seasonTeamId, [{ playerId: "p1", amount: 4 }])).rejects.toThrow(/minimum/i);
+    await expect(auction.submit(meta(seasonId, "OVER_BUDGET"), 1, alpha.seasonTeamId, [{ playerId: "p1", amount: 351 }])).rejects.toThrow(/budget/i);
+    await auction.submit(meta(seasonId, "SAVE_VALID"), 1, alpha.seasonTeamId, [{ playerId: "p1", amount: 10 }]);
+    await auction.finalize(meta(seasonId, "FINALIZE_VALID"), 1, alpha.seasonTeamId);
+    await expect(auction.submit(meta(seasonId, "EDIT_FINAL"), 1, alpha.seasonTeamId, [{ playerId: "p2", amount: 10 }])).rejects.toThrow(/finalized/i);
+    const finalizedVersion = await store.seasonVersion(seasonId);
+    await expect(auction.finalize(meta(seasonId, "FINALIZE_AGAIN"), 1, alpha.seasonTeamId)).rejects.toThrow(/already finalized/i);
+    expect(await store.seasonVersion(seasonId)).toBe(finalizedVersion);
+  });
+
+  it("keeps the round route masked while the selected-team route rehydrates and finalizes one private draft", async () => {
+    const { store, seasonId, auction } = await fixture();
+    const openedRound = await auction.open(meta(seasonId, "OPEN_ROUTES"), 1);
+    const alpha = openedRound.teams[0]!;
+    await auction.submit(meta(seasonId, "SAVE_ROUTE_DRAFT"), 1, alpha.seasonTeamId, [{ playerId: "p1", amount: 10 }]);
+    const server = Fastify();
+    registerErrorEnvelope(server);
+    await registerAuctionRoutes(server, auction);
+    const masked = await server.inject({ method: "GET", url: `/api/auction/${seasonId}/1` });
+    expect(masked.statusCode).toBe(200);
+    expect(masked.json().teams[0]).not.toHaveProperty("bids");
+    const privateDraft = await server.inject({ method: "GET", url: `/api/auction/${seasonId}/1/teams/${alpha.seasonTeamId}/submission` });
+    expect(privateDraft.json()).toMatchObject({ seasonTeamId: alpha.seasonTeamId, bids: [{ playerName: "One", minimumBid: 5, amount: 10 }] });
+    const version = (await store.getSeason(actor, seasonId))!.rowVersion;
+    const stale = await server.inject({ method: "POST", url: `/api/auction/${seasonId}/1/teams/${alpha.seasonTeamId}/finalize`, headers: { "idempotency-key": "route-finalize-stale", "x-expected-season-version": String(version - 1) }, payload: {} });
+    expect(stale.statusCode).toBe(409);
+    expect(await auction.submission(actor, seasonId, 1, alpha.seasonTeamId)).toMatchObject({ status: "DRAFT", bidCount: 1 });
+    const finalized = await server.inject({ method: "POST", url: `/api/auction/${seasonId}/1/teams/${alpha.seasonTeamId}/finalize`, headers: { "idempotency-key": "route-finalize", "x-expected-season-version": String(version) }, payload: {} });
+    expect(finalized.statusCode).toBe(200);
+    expect(finalized.json().teams.find((team: { seasonTeamId: string }) => team.seasonTeamId === alpha.seasonTeamId)).toMatchObject({ status: "FINAL", bidCount: 1 });
+    await server.close();
+  });
+
   it("includes a selected keeper exactly once when resolving an all-zero round", async () => {
     const { store, seasonId, auction } = await fixture({ withKeeper: true });
     const openedRound = await auction.open(meta(seasonId, "OPEN_KEEPER_R1"), 1);

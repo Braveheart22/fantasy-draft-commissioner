@@ -34,12 +34,13 @@ async function load(page, seasonId) {
 }
 
 async function act(page,button){await button.click();await page.waitForFunction(()=>document.querySelector("fieldset")?.disabled===true);await page.waitForFunction(()=>document.querySelector("fieldset")?.disabled===false);}
-async function selectPlayer(page,label,name){await page.getByLabel(`${label} search`).fill(name);await page.getByRole("button",{name:"Search players"}).click();await page.getByRole("button",{name:new RegExp(`^${name} ·`)}).click();}
+async function selectPlayer(page,label,name){const finder=page.getByLabel(label,{exact:true});await page.getByLabel(`${label} search`).fill(name);await page.getByLabel(`${label} search`).press("Enter");await finder.getByRole("button",{name:new RegExp(`^${name} ·`)}).click();}
 
 async function zeroBidRound(page, round) {
   await act(page,page.getByRole("button", { name: `Open round ${round}` }));
-  await act(page,page.getByRole("button", { name: "Finalize zero bids for Alpha" }));
-  await act(page,page.getByRole("button", { name: "Finalize zero bids for Beta" }));
+  await act(page,page.getByRole("button", { name: "Finalize zero bids", exact: true }));
+  await page.getByRole("button", { name: / · DRAFT · 0 bid\(s\)$/ }).click();
+  await act(page,page.getByRole("button", { name: "Finalize zero bids", exact: true }));
   await act(page,page.getByRole("button", { name: `Lock, resolve & reveal round ${round}` }));
   await act(page,page.getByRole("button", { name: `Publish round ${round}` }));
 }
@@ -76,9 +77,15 @@ test("commissioner UI records an auction tie and confirms an audited correction"
   await seedLockedSeason(request, seasonId, 1);
   await load(page, seasonId);
   await act(page,page.getByRole("button", { name: "Open round 1" }));
-  await selectPlayer(page,"Bid player","Player 0");
-  await act(page,page.getByRole("button", { name: "Finalize bid for Alpha" }));
-  await act(page,page.getByRole("button", { name: "Finalize bid for Beta" }));
+  await selectPlayer(page,"Priority 1 player","Player 0");
+  await page.getByLabel("Priority 1 amount").fill("10");
+  await act(page,page.getByRole("button", { name: "Save draft", exact: true }));
+  await act(page,page.getByRole("button", { name: "Finalize saved draft", exact: true }));
+  await page.getByRole("button", { name: "Beta · DRAFT · 0 bid(s)", exact: true }).click();
+  await selectPlayer(page,"Priority 1 player","Player 0");
+  await page.getByLabel("Priority 1 amount").fill("10");
+  await act(page,page.getByRole("button", { name: "Save draft", exact: true }));
+  await act(page,page.getByRole("button", { name: "Finalize saved draft", exact: true }));
   await act(page,page.getByRole("button", { name: "Lock, resolve & reveal round 1" }));
   await act(page,page.getByRole("button", { name: /Record external tie winner/ }));
   await act(page,page.getByRole("button", { name: "Publish round 1" }));
@@ -129,23 +136,24 @@ test("player finder keeps filters and keyboard selection bounded on a large cata
   await load(page, seasonId);
   await act(page,page.getByRole("button", { name: "Open round 1" }));
 
-  await page.getByLabel("Bid player search").fill("large");
-  await page.getByLabel("Position").selectOption("WR");
-  await page.getByLabel("NFL team").fill("MIN");
-  await page.getByLabel("Source").selectOption("NFL");
-  await page.getByLabel("Bid player search").press("Enter");
-  await expect(page.getByText("2500 players found.")).toBeVisible();
-  await expect(page.locator(".player-finder li button")).toHaveCount(25);
-  const firstResult = page.getByRole("button", { name: /^Large Player 1-0 ·/ });
+  const bidFinder = page.getByLabel("Priority 1 player", { exact: true });
+  await bidFinder.getByLabel("Priority 1 player search").fill("large");
+  await bidFinder.getByLabel("Position").selectOption("WR");
+  await bidFinder.getByLabel("NFL team").fill("MIN");
+  await bidFinder.getByLabel("Source").selectOption("NFL");
+  await page.getByLabel("Priority 1 player search").press("Enter");
+  await expect(bidFinder.getByText("2500 players found.")).toBeVisible();
+  await expect(bidFinder.locator("li button")).toHaveCount(25);
+  const firstResult = bidFinder.getByRole("button", { name: /^Large Player 1-0 ·/ });
   await firstResult.focus();
   await firstResult.press("Enter");
   await expect(firstResult).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Next players" }).click();
-  await expect(page.getByText("Page 2 of 100")).toBeVisible();
-  await expect(page.getByLabel("Bid player search")).toHaveValue("large");
-  await expect(page.getByLabel("Position")).toHaveValue("WR");
-  await expect(page.getByLabel("NFL team")).toHaveValue("MIN");
-  await expect(page.getByLabel("Source")).toHaveValue("NFL");
+  await bidFinder.getByRole("button", { name: "Next players" }).click();
+  await expect(bidFinder.getByText("Page 2 of 100")).toBeVisible();
+  await expect(page.getByLabel("Priority 1 player search")).toHaveValue("large");
+  await expect(bidFinder.getByLabel("Position")).toHaveValue("WR");
+  await expect(bidFinder.getByLabel("NFL team")).toHaveValue("MIN");
+  await expect(bidFinder.getByLabel("Source")).toHaveValue("NFL");
   expect(searchRequests.at(-1)).toContain("search=large");
   expect(searchRequests.at(-1)).toContain("nflTeam=MIN");
   expect(searchRequests.at(-1)).toContain("sourceType=NFL");
@@ -165,7 +173,7 @@ test("loading another season replaces active staged UI state", async ({ page, re
   await act(page, page.getByRole("button", { name: /Record external order tie/ }));
   await act(page, page.getByRole("button", { name: "Finalize permanent order" }));
   await expect(page.getByText("Pick 1:", { exact: false })).toBeVisible();
-  await expect(page.getByLabel("Bid player search")).toHaveCount(0);
+  await expect(page.getByLabel("Priority 1 player search")).toHaveCount(0);
   await selectPlayer(page,"Available player","Player 0");
 
   await page.getByLabel("Existing season ID").fill(currentSeasonId);
@@ -173,7 +181,7 @@ test("loading another season replaces active staged UI state", async ({ page, re
 
   await expect(page.getByRole("heading", { name: "Auction round 1" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Auction round 2" })).toHaveCount(0);
-  await expect(page.getByLabel("Bid player search")).toHaveValue("");
+  await expect(page.getByLabel("Priority 1 player search")).toHaveValue("");
   await expect(page.getByLabel("Available player search")).toHaveCount(0);
   await expect(page.getByText("Pick 1:", { exact: false })).toHaveCount(0);
 });

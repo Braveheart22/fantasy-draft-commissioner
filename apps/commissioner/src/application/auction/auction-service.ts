@@ -12,6 +12,8 @@ export class AuctionService {
     if (!bids.length && options.finalize && !options.confirmZero) throw new Error("Zero-bid submissions require explicit confirmation");
     return this.repository.saveSubmission(metadata, round, teamId, bids, Boolean(options.finalize), Boolean(options.confirmZero));
   }
+  submission(actor: ActorDescriptor, seasonId: string, round: AuctionRoundNumber, teamId: string) { return this.repository.submission(actor, seasonId, round, teamId); }
+  finalize(metadata: CommandMetadata, round: AuctionRoundNumber, teamId: string, options: { confirmZero?: boolean } = {}) { return this.repository.finalizeSubmission(metadata, round, teamId, Boolean(options.confirmZero)); }
   async lockAndResolve(metadata: CommandMetadata, round: AuctionRoundNumber, rosterRules: CommissionerAuctionInput["rosterRules"]) {
     await this.checkpoints?.before(metadata, `PRE_AUCTION_R${round}_LOCK`);
     const input = await this.repository.lockRound(metadata, round, rosterRules);

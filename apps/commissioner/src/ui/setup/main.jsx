@@ -10,6 +10,7 @@ import { CatalogPreparationPanel } from "../stages/setup/catalog-preparation-pan
 import { PricingPreparationPanel } from "../stages/setup/pricing-preparation-panel.jsx";
 import { PlayerFinder } from "../shared/player-finder.jsx";
 import { KeepersPanel } from "../stages/keepers/keepers-panel.jsx";
+import { AuctionPanel } from "../stages/auction/auction-panel.jsx";
 
 const client = createApiClient();
 const activation = createSeasonActivation(client);
@@ -28,8 +29,6 @@ function SetupApp() {
   const [busy, setBusy] = useState(false);
   const [roundNumber, setRoundNumber] = useState(1);
   const [auction, setAuction] = useState(null);
-  const [bidPlayerId, setBidPlayerId] = useState("");
-  const [bidAmount, setBidAmount] = useState("10");
   const [draft, setDraft] = useState(null);
   const [draftPlayerId, setDraftPlayerId] = useState("");
   const [bootstrap, setBootstrap] = useState(null);
@@ -47,21 +46,16 @@ function SetupApp() {
     setSeasonInput(id);
     setRoundNumber(nextRound);
     setAuction(nextAuction);
-    setBidPlayerId("");
-    setBidAmount("10");
     setDraft(nextDraft);
     setDraftPlayerId("");
     setBootstrap(nextBootstrap);
     return result;
   };
   const loadSeason = id => run(() => activateSeason(id), { refresh: false });
-  const refreshAuction = async (round = roundNumber, reveal = false) => { const result = await api(`/api/auction/${seasonId}/${round}${reveal ? "?reveal=true" : ""}`); setRoundNumber(round); setAuction(result); return result; };
-  const runAuction = action => run(async () => { const result = await action(); if (result?.teams) setAuction(result); return result; });
-  const unresolvedTie = auction?.attempts?.at(-1)?.unresolvedTies?.[0];
 
   const setupView = <><h2>Teams & catalog</h2><button onClick={() => run(() => api(`/api/setup/${seasonId}/teams`, "PUT", { teams: [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }] }))}>Add teams</button><button onClick={() => run(() => api(`/api/setup/${seasonId}/custom-players`, "POST", { id: `eddie-gallagher-${seasonId}`, name: "Eddie Gallagher", position: "K" }))}>Add Eddie Gallagher</button><CatalogPreparationPanel seasonId={seasonId} request={api} onChanged={() => refreshShell(seasonId)} /><button onClick={() => run(async () => { const content = JSON.stringify([{ externalId: "jj-18", name: "Justin Jefferson", position: "WR" }]); const preview = await api(`/api/setup/${seasonId}/imports/preview`, "POST", { namespace: "sample-nfl", content, format: "json" }); if (preview.errors.length || preview.reviews.length) throw new Error("Import needs review"); await api(`/api/setup/${seasonId}/imports`, "POST", { namespace: "sample-nfl", format: "json", preview }); return api(`/api/setup/${seasonId}`); })}>Import sample NFL players</button><button onClick={() => run(() => api(`/api/setup/${seasonId}/pricing`, "PUT", { floors: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 } }))}>Set $1 floors</button><PricingPreparationPanel seasonId={seasonId} seasonVersion={bootstrap?.season.rowVersion} request={api} onChanged={() => refreshShell(seasonId)} /></>;
   const keepersView = <KeepersPanel seasonId={seasonId} request={api} onChanged={() => refreshShell(seasonId)} onPendingChange={setBusy} />;
-  const auctionView = <><h2>Auction round {roundNumber}</h2>{summary && <ul>{summary.teams.map(team => <li key={team.id}>{team.displayName}: ${team.startingBudget}</li>)}</ul>}<p>Team contents remain masked until the round is locked and explicitly revealed.</p><button onClick={() => runAuction(() => api(`/api/auction/${seasonId}/${roundNumber}/open`, "POST"))}>Open round {roundNumber}</button>{auction?.roundNumber === roundNumber && <><PlayerFinder label="Bid player" seasonId={seasonId} request={api} stagePolicy="AUCTION" selectedPlayerId={bidPlayerId} onSelect={player => setBidPlayerId(player.id)} /><label>Amount <input aria-label="Bid amount" type="number" value={bidAmount} onChange={event => setBidAmount(event.target.value)} /></label>{auction.teams.map(team => <span key={team.seasonTeamId}><button disabled={auction.status !== "BIDDING" || !bidPlayerId} onClick={() => runAuction(async () => { await api(`/api/auction/${seasonId}/${roundNumber}/teams/${team.seasonTeamId}`, "PUT", { bids: [{ playerId: bidPlayerId, amount: Number(bidAmount) }], finalize: true }); return refreshAuction(); })}>Finalize bid for {team.displayName}</button><button disabled={auction.status !== "BIDDING"} onClick={() => runAuction(async () => { await api(`/api/auction/${seasonId}/${roundNumber}/teams/${team.seasonTeamId}`, "PUT", { bids: [], finalize: true, confirmZero: true }); return refreshAuction(); })}>Finalize zero bids for {team.displayName}</button></span>)}</>}<button disabled={!auction || auction.status !== "BIDDING"} onClick={() => runAuction(async () => { await api(`/api/auction/${seasonId}/${roundNumber}/lock`, "POST", {}); return refreshAuction(roundNumber, true); })}>Lock, resolve & reveal round {roundNumber}</button>{unresolvedTie && <button onClick={() => runAuction(async () => { await api(`/api/auction/${seasonId}/${roundNumber}/ties`, "POST", { tieKey: unresolvedTie.key, playerId: unresolvedTie.playerId, amount: unresolvedTie.amount, participantTeamIds: unresolvedTie.teamIds, preferredTeamId: unresolvedTie.teamIds[0], method: "commissioner-recorded external draw", decidedAt: new Date().toISOString() }); return refreshAuction(roundNumber, true); })}>Record external tie winner: {unresolvedTie.teamIds[0]}</button>}<button disabled={auction?.status !== "REVIEW"} onClick={() => runAuction(() => api(`/api/auction/${seasonId}/${roundNumber}/publish`, "POST"))}>Publish round {roundNumber}</button></>;
+  const auctionView = <AuctionPanel seasonId={seasonId} roundNumber={roundNumber} request={api} onChanged={() => refreshShell(seasonId)} onPendingChange={setBusy} initialSummary={auction?.roundNumber === roundNumber ? auction : null} />;
   const orderView = <><h2>Draft Order</h2><button onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/calculate`, "POST"); setDraft(result); return result; })}>Calculate order from Round 2 balances</button>{draft?.ties?.map(tie => <button key={tie.balance} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/ties`, "POST", { balance: tie.balance, participantTeamIds: tie.seasonTeamIds, precedenceTeamIds: [...tie.seasonTeamIds].reverse(), method: "commissioner-recorded external draw", decidedAt: new Date().toISOString() }); setDraft(result); return result; })}>Record external order tie at ${tie.balance}</button>)}<button disabled={!draft || draft.status !== "TIE_PAUSED" || draft.ties.length > 0} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/order/finalize`, "POST"); setDraft(result); return result; })}>Finalize permanent order</button></>;
   const draftView = <><h2>Draft</h2>{draft?.currentSeasonTeamId && <><p>Pick {draft.nextOverallPick}: {draft.order.find(team => team.seasonTeamId === draft.currentSeasonTeamId)?.displayName} is on the clock.</p><PlayerFinder label="Available player" seasonId={seasonId} request={api} stagePolicy="DRAFT" selectedPlayerId={draftPlayerId} onSelect={player => setDraftPlayerId(player.id)} /><button disabled={!draftPlayerId} onClick={() => run(async () => { const result = await api(`/api/draft/${seasonId}/picks`, "POST", { seasonTeamId: draft.currentSeasonTeamId, playerId: draftPlayerId, rosterRules: draftRules }); setDraft(result); setDraftPlayerId(""); return result; })}>Commit legal pick</button></>}</>;
   const views = { SETUP: setupView, KEEPERS: keepersView, AUCTION_1: auctionView, AUCTION_2: auctionView, DRAFT_ORDER: orderView, DRAFT: draftView, RESULTS: <><h2>Results</h2><p>The season is complete.</p><ExportsPanel seasonId={seasonId} seasonVersion={() => client.expectedVersion()} /></> };
