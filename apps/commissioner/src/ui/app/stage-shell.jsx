@@ -1,10 +1,24 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { requestedStageFromHash, stageAccess, stageViewPolicy, stages } from "./stage-model.js";
+import { guardedStageRoute } from "../shared/stage-mutation-guard.jsx";
 
 export function StageShell({ bootstrap, children }) {
   const [requested, setRequested] = useState(() => requestedStageFromHash(location.hash, bootstrap.legalStage));
+  const currentRoute = useRef(requested);
+  const hydratedStage = useRef(bootstrap.legalStage);
   useEffect(() => {
-    const readRoute = () => setRequested(requestedStageFromHash(location.hash, bootstrap.legalStage));
+    // Publish canonical navigation only after hydration commits. Changing the
+    // hash in refreshShell lets the old listener reject the new legal stage.
+    if (hydratedStage.current !== bootstrap.legalStage) {
+      location.hash = `stage/${bootstrap.legalStage}`;
+      hydratedStage.current = bootstrap.legalStage;
+    }
+    const readRoute = () => {
+      const next = requestedStageFromHash(location.hash, bootstrap.legalStage);
+      currentRoute.current = guardedStageRoute(window, next, currentRoute.current, bootstrap.legalStage,
+        stage => history.replaceState(null, "", `#stage/${stage}`));
+      setRequested(currentRoute.current);
+    };
     readRoute();
     addEventListener("hashchange", readRoute);
     return () => removeEventListener("hashchange", readRoute);

@@ -45,6 +45,13 @@ async function zeroBidRound(page, round) {
   await act(page,page.getByRole("button", { name: `Publish round ${round}` }));
 }
 
+async function recordExternalTie(page) {
+  await page.getByLabel(/^Precedence 1 at/).selectOption({ label: "Beta" });
+  await page.getByLabel(/^Precedence 2 at/).selectOption({ label: "Alpha" });
+  await page.getByLabel(/^Tie decision method at/).fill("Witnessed external draw");
+  await act(page, page.getByRole("button", { name: /Record external order tie/ }));
+}
+
 test("commissioner UI completes both rounds, order, fixed draft, recovery, and export", async ({ page, request }) => {
   const seasonId = `ui-full-${Date.now()}`;
   await seedLockedSeason(request, seasonId);
@@ -53,7 +60,7 @@ test("commissioner UI completes both rounds, order, fixed draft, recovery, and e
   await expect(page.getByRole("heading", { name: "Auction round 2" })).toBeVisible();
   await zeroBidRound(page, 2);
   await act(page,page.getByRole("button", { name: "Calculate order from Round 2 balances" }));
-  await act(page,page.getByRole("button", { name: /Record external order tie/ }));
+  await recordExternalTie(page);
   await act(page,page.getByRole("button", { name: "Finalize permanent order" }));
 
   const setup = await (await request.get(`/api/setup/${seasonId}`)).json();
@@ -66,7 +73,7 @@ test("commissioner UI completes both rounds, order, fixed draft, recovery, and e
     }
   }
   await page.getByRole("button", { name: "Show recovery summary" }).click();
-  await expect(page.getByText("Database integrity: ok; schema 9.")).toBeVisible();
+  await expect(page.getByText("Database integrity: ok; schema 10.")).toBeVisible();
   await page.getByRole("button", { name: "Create CSV & JSON" }).click();
   await expect(page.getByText("Export complete")).toBeVisible();
   await expect(page.getByText(/final-rosters\.json/)).toBeVisible();
@@ -170,7 +177,7 @@ test("loading another season replaces active staged UI state", async ({ page, re
   await zeroBidRound(page, 1);
   await zeroBidRound(page, 2);
   await act(page, page.getByRole("button", { name: "Calculate order from Round 2 balances" }));
-  await act(page, page.getByRole("button", { name: /Record external order tie/ }));
+  await recordExternalTie(page);
   await act(page, page.getByRole("button", { name: "Finalize permanent order" }));
   await expect(page.getByText("Round 1 · Overall pick 1", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Priority 1 player search")).toHaveCount(0);

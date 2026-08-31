@@ -167,7 +167,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       let draftSummary: DraftOrderSummary | null = null;
       if (draft) {
         const [entries, balances, decisions, pickRows, assignments] = await Promise.all([
-          database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }),
+          database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null }, orderBy: { orderPosition: "asc" } }),
           database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }),
           database.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null } }),
           database.draftPick.findMany({ where: { conventionalDraftId: draft.id, active: true }, orderBy: { overallPick: "desc" } }),
@@ -1000,7 +1000,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const draft = await database.conventionalDraft.findUniqueOrThrow({ where: { seasonId: metadata.seasonId } });
       if (draft.status === "FINAL" || draft.status === "IN_PROGRESS" || draft.status === "COMPLETED") return;
       const balances = await database.teamAuctionBalance.findMany({ where: { seasonId: metadata.seasonId, roundNumber: 2 } });
-      const decisions = await database.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id } });
+      const decisions = await database.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null } });
       const decisionMap = new Map(decisions.map(item => [item.balance, JSON.parse(item.precedenceTeamIdsJson) as string[]]));
       const groups = [...groupBalances(balances)].sort((a, b) => b[0] - a[0]); const ordered: typeof balances = [];
       for (const [balance, group] of groups) { if (group.length === 1) ordered.push(group[0]!); else { const precedence = decisionMap.get(balance); if (!precedence) throw new Error(`Missing external precedence for tied balance ${balance}`); const byId = new Map(group.map(item => [item.seasonTeamId, item])); ordered.push(...precedence.map(id => byId.get(id)!)); } }
@@ -1017,7 +1017,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     await this.setupCommand(metadata, async database => {
       const draft = await database.conventionalDraft.findUniqueOrThrow({ where: { seasonId: metadata.seasonId } });
       if (draft.status !== "FINAL" && draft.status !== "IN_PROGRESS") throw new Error("Conventional draft is not open");
-      const order = await database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }); const pickCount = await database.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } });
+      const order = await database.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null }, orderBy: { orderPosition: "asc" } }); const pickCount = await database.draftPick.count({ where: { conventionalDraftId: draft.id, active: true } });
       const current = order[pickCount % order.length]; if (!current || current.seasonTeamId !== input.seasonTeamId) throw new Error("Only the team currently on the clock may pick");
       const player = await requireSelectablePlayer(database, metadata.seasonId, input.playerId);
       const assignments = await database.rosterAssignment.findMany({ where: { seasonId: metadata.seasonId, seasonTeamId: input.seasonTeamId, supersededAt: null } }); const players = await database.player.findMany({ where: { id: { in: assignments.map(item => item.playerId) } } });
@@ -1033,15 +1033,16 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
 
   async draftSummary(_actor: ActorDescriptor, seasonId: string): Promise<DraftOrderSummary> {
     const draft = await this.prisma.conventionalDraft.findUniqueOrThrow({ where: { seasonId } });
-    const [entries, teams, balances, decisions, pickRows, assignments, players] = await Promise.all([
-      this.prisma.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { orderPosition: "asc" } }),
+    const [entries, teams, balances, decisions, pickRows, assignments] = await Promise.all([
+      this.prisma.draftOrderEntry.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null }, orderBy: { orderPosition: "asc" } }),
       this.prisma.seasonTeam.findMany({ where: { seasonId, active: true }, orderBy: { seedOrder: "asc" } }),
       this.prisma.teamAuctionBalance.findMany({ where: { seasonId, roundNumber: 2 } }),
-      this.prisma.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id } }),
+      this.prisma.draftOrderTieDecision.findMany({ where: { conventionalDraftId: draft.id, supersededAt: null } }),
       this.prisma.draftPick.findMany({ where: { conventionalDraftId: draft.id, active: true }, orderBy: { overallPick: "desc" } }),
       this.prisma.rosterAssignment.findMany({ where: { seasonId, supersededAt: null } }),
-      this.prisma.player.findMany({ where: { seasonId } }),
     ]);
+    const rosterPlayerIds = [...new Set([...assignments.map(item => item.playerId), ...pickRows.map(item => item.playerId)])];
+    const players = await this.prisma.player.findMany({ where: { seasonId, id: { in: rosterPlayerIds } } });
     const names = new Map(teams.map(team => [team.id, team.displayName]));
     const playerById = new Map(players.map(player => [player.id, player]));
     const pickByPlayerId = new Map(pickRows.map(pick => [pick.playerId, pick]));

@@ -31,7 +31,7 @@ function SetupApp() {
   const [auction, setAuction] = useState(null);
   const [draft, setDraft] = useState(null);
   const [bootstrap, setBootstrap] = useState(null);
-  const refreshShell = async id => { const next = await activation.activate(id); setBootstrap(next); setSummary(next.setup); location.hash = `stage/${next.legalStage}`; if (next.legalStage === "AUCTION_2") { setRoundNumber(2); setAuction(next.phases.auctionTwo); } else if (next.legalStage === "AUCTION_1") { setRoundNumber(1); setAuction(next.phases.auctionOne); } if (next.phases.draft) setDraft(next.phases.draft); return next; };
+  const refreshShell = async id => { const next = await activation.activate(id); setBootstrap(next); setSummary(next.setup); if (next.legalStage === "AUCTION_2") { setRoundNumber(2); setAuction(next.phases.auctionTwo); } else if (next.legalStage === "AUCTION_1") { setRoundNumber(1); setAuction(next.phases.auctionOne); } if (next.phases.draft) setDraft(next.phases.draft); return next; };
   const run = async (action, { refresh = true } = {}) => { setBusy(true); setMessage("Saving…"); try { const result = await action(); if (result?.season) setSummary(result); if (refresh && seasonId) await refreshShell(seasonId); setMessage("Saved"); return result; } catch (error) { setMessage(error.message); return undefined; } finally { setBusy(false); } };
   const activateSeason = async id => {
     const nextBootstrap = await activation.activate(id);

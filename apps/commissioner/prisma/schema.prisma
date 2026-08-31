@@ -109,8 +109,7 @@ model DraftOrderEntry {
   seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
   remainingBalance Int
   supersededAt DateTime?
-  @@unique([conventionalDraftId, orderPosition])
-  @@unique([conventionalDraftId, seasonTeamId])
+  // Partial unique indexes for active position/team are maintained by migration 10.
 }
 model DraftOrderTieDecision {
   id String @id
@@ -123,7 +122,7 @@ model DraftOrderTieDecision {
   note String?
   decidedAt DateTime
   supersededAt DateTime?
-  @@unique([conventionalDraftId, balance])
+  // Partial unique index for non-superseded balance is maintained by migration 10.
 }
 model DraftPick {
   id String @id
@@ -138,8 +137,7 @@ model DraftPick {
   active Boolean @default(true)
   supersededAt DateTime?
   createdAt DateTime @default(now())
-  @@unique([conventionalDraftId, overallPick])
-  @@unique([conventionalDraftId, playerId])
+  // Partial unique indexes for active overallPick/playerId are maintained by migration 10.
 }
 model Player {
   id String @id

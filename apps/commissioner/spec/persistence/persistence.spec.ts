@@ -129,7 +129,7 @@ describe("SQLite season persistence", () => {
     await store.close();
 
     const database = new Database(path, { readonly: true, fileMustExist: true });
-    expect(database.prepare("SELECT version FROM SchemaMetadata WHERE singleton=1").pluck().get()).toBe(9);
+    expect(database.prepare("SELECT version FROM SchemaMetadata WHERE singleton=1").pluck().get()).toBe(10);
     expect(database.pragma("integrity_check", { simple: true })).toBe("ok");
     expect(database.pragma("foreign_key_check")).toEqual([]);
     expect(database.prepare("SELECT count(*) FROM PlayerSourceAlias").pluck().get()).toBe(

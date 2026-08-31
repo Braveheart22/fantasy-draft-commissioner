@@ -21,12 +21,25 @@ export function createApiClient(fetcher = fetch) {
       if (method !== "GET" && data?.season?.rowVersion !== undefined) version = data.season.rowVersion;
       else if (!creating && method !== "GET") {
         const parts = path.split("?")[0].split("/");
-        const seasonId = parts[2] === "setup" ? parts[3] : parts[3];
+        const seasonId = parts[3];
         if (seasonId && seasonId !== "seasons" && seasonId !== "corrections") {
+          try {
           const bootstrapResponse = await fetcher(`/api/bootstrap/${encodeURIComponent(seasonId)}`, { method: "GET", headers: { "idempotency-key": makeKey() } });
           const bootstrap = await bootstrapResponse.json();
           if (!bootstrapResponse.ok) throw new Error(bootstrap.message ?? "Season refresh failed");
           version = bootstrap.season.rowVersion;
+          } catch (cause) {
+            if (parts[2] === "draft" && (parts[4] === "picks" || parts[4] === "order")) {
+              const message = parts[4] === "picks"
+                ? "Pick saved, but the season refresh failed. Reload draft state before continuing."
+                : "Draft order saved, but the season refresh failed. Reload draft order before continuing.";
+              const error = new Error(message, { cause });
+              error.code = "ACKNOWLEDGED_REFRESH_FAILED";
+              error.acknowledgedResult = data;
+              throw error;
+            }
+            throw cause;
+          }
         }
       }
       return data;

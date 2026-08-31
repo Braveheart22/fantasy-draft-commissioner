@@ -8,6 +8,7 @@ function errorCode(error: Error, statusCode: number): string {
   if (/currently on the clock/i.test(error.message)) return "WRONG_TEAM";
   if (/unavailable/i.test(error.message)) return "PLAYER_UNAVAILABLE";
   if (/unknown player/i.test(error.message)) return "UNKNOWN_PLAYER";
+  if (/UNKNOWN_POSITION/i.test(error.message)) return "UNKNOWN_POSITION";
   if (/ROSTER_CAPACITY_EXCEEDED|Illegal partial roster/i.test(error.message)) return "ROSTER_CAPACITY_EXCEEDED";
   return statusCode >= 500 ? "INTERNAL_ERROR" : "COMMAND_REJECTED";
 }

@@ -7,6 +7,18 @@ function response(body: unknown, ok = true) {
 }
 
 describe("season activation client", () => {
+  it.each(["calculate", "ties", "finalize"])("retains an acknowledged order %s when version hydration fails", async action => {
+    const accepted = { status: "TIE_PAUSED", order: [], ties: [] };
+    const client = createApiClient(vi.fn().mockImplementationOnce(() => response(accepted)).mockImplementationOnce(() => response({ message: "refresh unavailable" }, false)) as never);
+    await expect(client.request(`/api/draft/s/order/${action}`, "POST")).rejects.toMatchObject({ code: "ACKNOWLEDGED_REFRESH_FAILED", acknowledgedResult: accepted });
+  });
+  it("retains an acknowledged draft pick if its following version hydration fails",async()=>{
+    const accepted={nextOverallPick:4,currentSeasonTeamId:"beta",status:"IN_PROGRESS"};
+    const client=createApiClient(vi.fn().mockImplementationOnce(()=>response(accepted)).mockImplementationOnce(()=>response({message:"offline refresh"},false)) as never);
+    client.activateVersion(3);
+    await expect(client.request("/api/draft/s/picks","POST",{playerId:"p"})).rejects.toMatchObject({code:"ACKNOWLEDGED_REFRESH_FAILED",acknowledgedResult:accepted});
+    expect(client.expectedVersion()).toBe(3);
+  });
   it("redirects future stages and keeps completed stages read-only", () => {
     const future = stageAccess("AUCTION_1", requestedStageFromHash("#stage/DRAFT", "AUCTION_1"));
     expect(future).toMatchObject({ stage: "AUCTION_1", mode: "CURRENT", explanation: expect.stringContaining("not available") });

@@ -9,3 +9,5 @@ apps/commissioner/src/generated/
 .package-smoke-data/
 .package-smoke-backup/
 .package-smoke-restore/
+apps/commissioner/test-results/
+apps/commissioner/playwright-report/
