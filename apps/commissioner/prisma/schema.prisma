@@ -262,7 +262,8 @@ model PositionPriceFloor {
   season Season @relation(fields: [seasonId], references: [id])
   position String
   minimumBid Int
-  @@unique([seasonId, position])
+  supersededAt DateTime?
+  // Partial unique index for active season/position is maintained by migration 11.
 }
 model PricePreparationBatch {
   id String @id

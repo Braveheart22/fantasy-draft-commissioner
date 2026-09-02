@@ -50,16 +50,17 @@ export class CorrectionService {
     return preview;
   }
 
-  confirm(previewId: string, input: { expectedVersion: number; cutHash: string; backupHash: string; confirmation: string; reason: string; actorLabel?: string; idempotencyKey?: string }): CorrectionPreview {
+  confirm(previewId: string, input: { seasonId: string; expectedVersion: number; cutHash: string; backupHash: string; confirmation: string; reason: string; actorLabel?: string; idempotencyKey?: string }): CorrectionPreview {
     if (input.confirmation !== "CONFIRM ROLLBACK") throw new Error("Typed confirmation must be CONFIRM ROLLBACK");
     if (!input.reason.trim()) throw new Error("Correction reason is required");
     const db = new Database(this.databasePath, { fileMustExist: true });
     db.pragma("foreign_keys=ON");
     try {
       return db.transaction(() => {
-        if (input.idempotencyKey) { const duplicate = db.prepare("SELECT resultJson FROM AuditEvent WHERE idempotencyKey=? AND commandType='CONFIRM_CORRECTION'").get(input.idempotencyKey) as { resultJson: string } | undefined; if (duplicate) { const result = JSON.parse(duplicate.resultJson) as { previewId: string }; const existing = db.prepare("SELECT impactJson FROM CorrectionAction WHERE id=?").get(result.previewId) as { impactJson: string }; return JSON.parse(existing.impactJson) as CorrectionPreview; } }
+        if (input.idempotencyKey) { const duplicate = db.prepare("SELECT resultJson FROM AuditEvent WHERE seasonId=? AND actorType='LOCAL_COMMISSIONER' AND idempotencyKey=? AND commandType='CONFIRM_CORRECTION'").get(input.seasonId, input.idempotencyKey) as { resultJson: string } | undefined; if (duplicate) { const result = JSON.parse(duplicate.resultJson) as { previewId: string }; const existing = db.prepare("SELECT impactJson FROM CorrectionAction WHERE id=? AND seasonId=?").get(result.previewId, input.seasonId) as { impactJson: string }; return JSON.parse(existing.impactJson) as CorrectionPreview; } }
         const row = db.prepare("SELECT * FROM CorrectionAction WHERE id=? AND confirmedAt IS NULL").get(previewId) as Record<string, unknown> | undefined;
         if (!row) throw new Error("Correction preview not found or already confirmed");
+        if (String(row.seasonId) !== input.seasonId) throw new Error("Correction preview belongs to another season");
         const currentVersion = Number((db.prepare("SELECT rowVersion FROM Season WHERE id=?").get(row.seasonId) as { rowVersion: number }).rowVersion);
         const correctionType = String(row.correctionType) as CorrectionType;
         const targetId = row.targetId ? String(row.targetId) : undefined;
@@ -77,6 +78,20 @@ export class CorrectionService {
           } else if (item.entityType === "KeeperSelection") {
             db.prepare("UPDATE KeeperSelection SET supersededAt=? WHERE id=? AND supersededAt IS NULL").run(now, item.id);
             db.prepare("UPDATE RosterAssignment SET supersededAt=? WHERE acquisitionSource='KEEPER' AND sourceEntityId=? AND supersededAt IS NULL").run(now, item.id);
+          } else if (item.entityType === "CatalogPreparationBatch") {
+            db.prepare("UPDATE CatalogPreparationBatch SET state='SUPERSEDED' WHERE id=? AND state='APPROVED'").run(item.id);
+          } else if (item.entityType === "CatalogSnapshot") {
+            db.prepare("UPDATE CatalogSnapshot SET state='SUPERSEDED',supersededAt=? WHERE id=? AND supersededAt IS NULL").run(now, item.id);
+          } else if (item.entityType === "PlayerImportBatch") {
+            db.prepare("UPDATE PlayerImportBatch SET supersededAt=? WHERE id=? AND supersededAt IS NULL").run(now, item.id);
+          } else if (item.entityType === "Player") {
+            db.prepare("UPDATE Player SET providerActive=0,leagueSelectable=0,available=0,supersededAt=? WHERE id=? AND supersededAt IS NULL").run(now, item.id);
+          } else if (item.entityType === "PositionPriceFloor") {
+            db.prepare("UPDATE PositionPriceFloor SET supersededAt=? WHERE id=? AND supersededAt IS NULL").run(now, item.id);
+          } else if (item.entityType === "PricePreparationBatch") {
+            db.prepare("UPDATE PricePreparationBatch SET state='SUPERSEDED',supersededAt=? WHERE id=? AND supersededAt IS NULL").run(now, item.id);
+          } else if (item.entityType === "PlayerPriceAssignment") {
+            db.prepare("UPDATE PlayerPriceAssignment SET active=0,supersededAt=? WHERE id=? AND active=1").run(now, item.id);
           } else if (["AuctionRound", "AuctionAttempt", "AuctionTieDecision", "AuctionAward", "TeamAuctionBalance", "KeeperSelection", "DraftOrderEntry", "DraftOrderTieDecision", "ExportRecord"].includes(item.entityType)) {
             db.prepare(`UPDATE ${item.entityType} SET supersededAt=? WHERE id=? AND supersededAt IS NULL`).run(now, item.id);
           }
@@ -88,8 +103,14 @@ export class CorrectionService {
           db.prepare("UPDATE AuctionRound SET status='BIDDING',publishedAt=NULL WHERE id=? AND supersededAt IS NULL").run(targetId);
         }
         if (correctionType === "PICK") db.prepare("UPDATE ConventionalDraft SET status='IN_PROGRESS',completedAt=NULL WHERE seasonId=?").run(row.seasonId);
-        if (correctionType === "DRAFT_ORDER") db.prepare("UPDATE ConventionalDraft SET status='RESET',completedAt=NULL,orderSnapshotId=NULL,orderHash=NULL WHERE seasonId=?").run(row.seasonId);
-        db.prepare("UPDATE Player SET available=1 WHERE seasonId=? AND id NOT IN (SELECT playerId FROM RosterAssignment WHERE seasonId=? AND supersededAt IS NULL)").run(row.seasonId, row.seasonId);
+        if (["CATALOG_BATCH", "CUSTOM_PLAYER", "POSITION_FLOORS", "PRICE_BATCH", "MANUAL_PRICE", "KEEPER", "ROUND_1", "ROUND_2", "DRAFT_ORDER"].includes(correctionType)) db.prepare("UPDATE ConventionalDraft SET status='RESET',completedAt=NULL,orderSnapshotId=NULL,orderHash=NULL WHERE seasonId=?").run(row.seasonId);
+        if (manifest.some(item => item.entityType === "PlayerPriceAssignment")) {
+          const players = db.prepare("SELECT id FROM Player WHERE seasonId=?").all(row.seasonId) as Array<{ id: string }>;
+          const activePrice = db.prepare("SELECT minimumBid FROM PlayerPriceAssignment WHERE playerId=? AND active=1 ORDER BY CASE sourceType WHEN 'MANUAL' THEN 0 WHEN 'LIST' THEN 1 ELSE 2 END,createdAt DESC LIMIT 1");
+          const updatePrice = db.prepare("UPDATE Player SET explicitMinimumBid=? WHERE id=?");
+          for (const player of players) updatePrice.run((activePrice.get(player.id) as { minimumBid: number } | undefined)?.minimumBid ?? null, player.id);
+        }
+        db.prepare("UPDATE Player SET available=CASE WHEN providerActive=1 AND leagueSelectable=1 AND id NOT IN (SELECT playerId FROM RosterAssignment WHERE seasonId=? AND supersededAt IS NULL) THEN 1 ELSE 0 END WHERE seasonId=? AND supersededAt IS NULL").run(row.seasonId, row.seasonId);
         db.prepare("UPDATE Season SET state=?,rowVersion=rowVersion+1,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND rowVersion=?").run(state, row.seasonId, currentVersion);
         const sequence = Number((db.prepare("SELECT COALESCE(MAX(sequence),0) value FROM AuditEvent WHERE seasonId=?").get(row.seasonId) as { value: number }).value) + 1;
         const auditId = randomUUID();

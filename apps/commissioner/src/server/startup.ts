@@ -14,6 +14,7 @@ import { DraftOrderService } from "../application/draft-order/draft-order-servic
 import { ConventionalDraftService } from "../application/conventional-draft/conventional-draft-service.js";
 import { registerDraftRoutes } from "../routes/draft/draft-routes.js";
 import { BackupCoordinator } from "../infrastructure/files/backup-coordinator.js";
+import { ManualBackupService } from "../application/backups/manual-backup-service.js";
 import { CorrectionService } from "../application/corrections/correction-service.js";
 import { RecoveryService } from "../application/recovery/recovery-service.js";
 import { registerOperationsRoutes } from "../routes/operations/operations-routes.js";
@@ -21,6 +22,9 @@ import { CheckpointService } from "../application/backups/checkpoint-service.js"
 import { ExportService } from "../application/exports/export-service.js";
 import { registerExportRoutes } from "../routes/exports/export-routes.js";
 import { BootstrapService } from "../application/bootstrap/bootstrap-service.js";
+import { OperationsService } from "../application/operations/operations-service.js";
+import { ResultsService } from "../application/results/results-service.js";
+import { registerResultsRoutes } from "../routes/results/results-routes.js";
 import { registerBootstrapRoutes } from "../routes/bootstrap/bootstrap-routes.js";
 import { CatalogPreparationService } from "../application/catalog/catalog-preparation-service.js";
 import { registerCatalogRoutes } from "../routes/catalog/catalog-routes.js";
@@ -82,7 +86,9 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   await registerSetupRoutes(server, setup);
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);
-  await registerOperationsRoutes(server, { backup: new BackupCoordinator(databasePath), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), backupDirectory, databasePath });
+  const backupCoordinator = new BackupCoordinator(databasePath);
+  await registerOperationsRoutes(server, { backup: new ManualBackupService(databasePath, backupDirectory, backupCoordinator), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), queries: new OperationsService(store) });
+  await registerResultsRoutes(server, new ResultsService(store));
   await registerExportRoutes(server,new ExportService(databasePath,backupDirectory),join(dataDirectory,"exports"));
   await registerBuiltUi(server);
   try {

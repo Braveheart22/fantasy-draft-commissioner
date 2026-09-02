@@ -3,6 +3,8 @@ import type { FastifyInstance } from "fastify";
 export interface ErrorEnvelope { statusCode:number; code:string; message:string }
 
 function errorCode(error: Error, statusCode: number): string {
+  if (/Results are available after/i.test(error.message)) return "RESULTS_NOT_AVAILABLE";
+  if (/Unsupported Operations|Unsupported correction|positive integer|pageSize|record state|correctionLineage/i.test(error.message)) return "INVALID_OPERATIONS_QUERY";
   if (/Idempotency-Key|Expected-Season-Version/i.test(error.message)) return "INVALID_COMMAND_ENVELOPE";
   if (/stale|version/i.test(error.message)) return "STALE_VERSION";
   if (/currently on the clock/i.test(error.message)) return "WRONG_TEAM";

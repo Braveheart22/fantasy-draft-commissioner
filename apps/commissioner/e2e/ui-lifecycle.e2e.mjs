@@ -33,13 +33,13 @@ async function load(page, seasonId) {
   await expect(page.getByRole("status").first()).toHaveText("Saved");
 }
 
-async function act(page,button){await button.click();await page.waitForFunction(()=>document.querySelector("fieldset")?.disabled===true);await page.waitForFunction(()=>document.querySelector("fieldset")?.disabled===false);}
+async function act(page,button){const commandPromise=page.waitForResponse(response=>response.url().includes("/api/")&&!['GET','OPTIONS'].includes(response.request().method()));const hydrationPromise=page.waitForResponse(response=>response.url().includes("/api/bootstrap/")&&response.request().method()==="GET");await button.click();const command=await commandPromise;expect(command.ok(),`${command.request().method()} ${command.url()}: ${await command.text()}`).toBeTruthy();const hydration=await hydrationPromise;expect(hydration.ok(),`GET ${hydration.url()}: ${await hydration.text()}`).toBeTruthy();}
 async function selectPlayer(page,label,name){const finder=page.getByLabel(label,{exact:true});await page.getByLabel(`${label} search`).fill(name);await page.getByLabel(`${label} search`).press("Enter");await finder.getByRole("button",{name:new RegExp(`^${name} ·`)}).click();}
 
 async function zeroBidRound(page, round) {
   await act(page,page.getByRole("button", { name: `Open round ${round}` }));
   await act(page,page.getByRole("button", { name: "Finalize zero bids", exact: true }));
-  await page.getByRole("button", { name: / · DRAFT · 0 bid\(s\)$/ }).click();
+  await page.getByRole("button", { name: / · DRAFT · 0 bid\(s\)$/, pressed: false }).click();
   await act(page,page.getByRole("button", { name: "Finalize zero bids", exact: true }));
   await act(page,page.getByRole("button", { name: `Lock, resolve & reveal round ${round}` }));
   await act(page,page.getByRole("button", { name: `Publish round ${round}` }));
@@ -72,11 +72,12 @@ test("commissioner UI completes both rounds, order, fixed draft, recovery, and e
       await act(page,page.getByRole("button", { name: "Commit legal pick" }));
     }
   }
-  await page.getByRole("button", { name: "Show recovery summary" }).click();
-  await expect(page.getByText("Database integrity: ok; schema 10.")).toBeVisible();
   await page.getByRole("button", { name: "Create CSV & JSON" }).click();
   await expect(page.getByText("Export complete")).toBeVisible();
   await expect(page.getByText(/final-rosters\.json/)).toBeVisible();
+  await page.getByRole("button", { name: "Operations", exact: true }).click();
+  await page.getByRole("button", { name: "Show recovery summary" }).click();
+  await expect(page.getByText("Database integrity: ok; schema 11.")).toBeVisible();
 });
 
 test("commissioner UI records an auction tie and confirms an audited correction", async ({ page, request }) => {
@@ -97,16 +98,16 @@ test("commissioner UI records an auction tie and confirms an audited correction"
   await act(page,page.getByRole("button", { name: /Record external tie winner/ }));
   await act(page,page.getByRole("button", { name: "Publish round 1" }));
 
-  const round = await (await request.get(`/api/auction/${seasonId}/1`)).json();
-  await page.getByLabel("Correction type").selectOption("AUCTION_REOPEN");
-  await page.getByLabel("Correction target ID").fill(round.roundId);
+  await page.getByRole("button", { name: "Operations", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Operations", exact: true })).toBeVisible();
+  await page.getByLabel("Correction target").selectOption({ label: "Auction round 1 · PUBLISHED" });
   await page.getByRole("button", { name: "Preview correction impact" }).click();
-  await expect(page.getByText(/Correction affects/)).toBeVisible();
+  await expect(page.getByText(/correction affects/i)).toBeVisible();
   await page.getByLabel("Correction reason").fill("Correct the recorded external result");
   await page.getByLabel("Typed correction confirmation").fill("CONFIRM ROLLBACK");
   await page.getByRole("button", { name: "Confirm audited rollback" }).click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
-  await expect(page.getByText(/Restore is intentionally unavailable/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Auction round 1" })).toBeVisible();
 });
 
 test("player finder keeps filters and keyboard selection bounded on a large catalog", async ({ page, request }) => {
@@ -184,7 +185,7 @@ test("loading another season replaces active staged UI state", async ({ page, re
   await selectPlayer(page,"Available player","Player 0");
 
   await page.getByLabel("Existing season ID").fill(currentSeasonId);
-  await act(page, page.getByRole("button", { name: "Load season" }));
+  await page.getByRole("button", { name: "Load season" }).click();
 
   await expect(page.getByRole("heading", { name: "Auction round 1" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Auction round 2" })).toHaveCount(0);
@@ -207,6 +208,7 @@ test("direct future navigation redirects and completed stages expose no normal m
   await expect(page.locator('[data-stage="SETUP"][data-mode="READ_ONLY"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "Add teams" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Set $1 floors" })).toBeDisabled();
-  await expect(page.getByRole("link", { name: "Preview a correction in Operations" })).toHaveAttribute("href", "#operations");
+  await page.getByRole("button", { name: "Preview a correction in Operations" }).click();
+  await expect(page.getByRole("heading", { name: "Operations", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open round 1" })).toHaveCount(0);
 });

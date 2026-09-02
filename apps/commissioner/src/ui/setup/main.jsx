@@ -1,8 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./setup.css";
 import { OperationsPanel } from "../operations/operations-panel.jsx";
-import { ExportsPanel } from "../exports/exports-panel.jsx";
 import { LifecycleState } from "../../application/ports/season-repository.js";
 import { createApiClient, createSeasonActivation } from "../shared/api-client.js";
 import { StageShell } from "../app/stage-shell.jsx";
@@ -12,6 +11,7 @@ import { KeepersPanel } from "../stages/keepers/keepers-panel.jsx";
 import { AuctionPanel } from "../stages/auction/auction-panel.jsx";
 import { DraftOrderPanel } from "../stages/draft-order/draft-order-panel.jsx";
 import { DraftPanel } from "../stages/draft/draft-panel.jsx";
+import { ResultsPanel } from "../stages/results/results-panel.jsx";
 
 const client = createApiClient();
 const activation = createSeasonActivation(client);
@@ -31,10 +31,13 @@ function SetupApp() {
   const [auction, setAuction] = useState(null);
   const [draft, setDraft] = useState(null);
   const [bootstrap, setBootstrap] = useState(null);
-  const refreshShell = async id => { const next = await activation.activate(id); setBootstrap(next); setSummary(next.setup); if (next.legalStage === "AUCTION_2") { setRoundNumber(2); setAuction(next.phases.auctionTwo); } else if (next.legalStage === "AUCTION_1") { setRoundNumber(1); setAuction(next.phases.auctionOne); } if (next.phases.draft) setDraft(next.phases.draft); return next; };
+  const [operationsOpen, setOperationsOpen] = useState(false);
+  useEffect(() => { const open = () => setOperationsOpen(true); addEventListener("open-operations", open); return () => removeEventListener("open-operations", open); }, []);
+  const refreshShell = async id => { const next = await activation.activate(id); if(!next)return activation.current(); setBootstrap(next); setSummary(next.setup); if (next.legalStage === "AUCTION_2") { setRoundNumber(2); setAuction(next.phases.auctionTwo); } else if (next.legalStage === "AUCTION_1") { setRoundNumber(1); setAuction(next.phases.auctionOne); } if (next.phases.draft) setDraft(next.phases.draft); return next; };
   const run = async (action, { refresh = true } = {}) => { setBusy(true); setMessage("Saving…"); try { const result = await action(); if (result?.season) setSummary(result); if (refresh && seasonId) await refreshShell(seasonId); setMessage("Saved"); return result; } catch (error) { setMessage(error.message); return undefined; } finally { setBusy(false); } };
   const activateSeason = async id => {
     const nextBootstrap = await activation.activate(id);
+    if (!nextBootstrap) return null;
     const result = nextBootstrap.setup;
     const state = result.season.state;
     const nextRound = roundTwoViewStates.has(state) ? 2 : 1;
@@ -50,17 +53,18 @@ function SetupApp() {
     return result;
   };
   const loadSeason = id => run(() => activateSeason(id), { refresh: false });
+  const resumeAfterOperation = async () => { if (!seasonId) return; setBusy(true); setMessage("Reloading corrected season…"); try { await activateSeason(seasonId); setMessage("Correction saved"); setOperationsOpen(false); } catch (error) { setMessage(error.message); throw error; } finally { setBusy(false); } };
 
   const setupView = <><h2>Teams & catalog</h2><button onClick={() => run(() => api(`/api/setup/${seasonId}/teams`, "PUT", { teams: [{ id: "alpha", displayName: "Alpha", seedOrder: 1 }, { id: "beta", displayName: "Beta", seedOrder: 2 }] }))}>Add teams</button><button onClick={() => run(() => api(`/api/setup/${seasonId}/custom-players`, "POST", { id: `eddie-gallagher-${seasonId}`, name: "Eddie Gallagher", position: "K" }))}>Add Eddie Gallagher</button><CatalogPreparationPanel seasonId={seasonId} request={api} onChanged={() => refreshShell(seasonId)} /><button onClick={() => run(async () => { const content = JSON.stringify([{ externalId: "jj-18", name: "Justin Jefferson", position: "WR" }]); const preview = await api(`/api/setup/${seasonId}/imports/preview`, "POST", { namespace: "sample-nfl", content, format: "json" }); if (preview.errors.length || preview.reviews.length) throw new Error("Import needs review"); await api(`/api/setup/${seasonId}/imports`, "POST", { namespace: "sample-nfl", format: "json", preview }); return api(`/api/setup/${seasonId}`); })}>Import sample NFL players</button><button onClick={() => run(() => api(`/api/setup/${seasonId}/pricing`, "PUT", { floors: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 } }))}>Set $1 floors</button><PricingPreparationPanel seasonId={seasonId} seasonVersion={bootstrap?.season.rowVersion} request={api} onChanged={() => refreshShell(seasonId)} /></>;
   const keepersView = <KeepersPanel seasonId={seasonId} request={api} onChanged={() => refreshShell(seasonId)} onPendingChange={setBusy} />;
   const auctionView = <AuctionPanel seasonId={seasonId} roundNumber={roundNumber} request={api} onChanged={() => refreshShell(seasonId)} onPendingChange={setBusy} initialSummary={auction?.roundNumber === roundNumber ? auction : null} />;
   const orderView = <DraftOrderPanel seasonId={seasonId} request={api} initialSummary={draft} onChanged={next => { if (next) setDraft(next); return refreshShell(seasonId); }} onPendingChange={setBusy} />;
   const draftView = <DraftPanel seasonId={seasonId} request={api} initialSummary={draft} onChanged={next => { if (next) setDraft(next); return refreshShell(seasonId); }} onPendingChange={setBusy} />;
-  const views = { SETUP: setupView, KEEPERS: keepersView, AUCTION_1: auctionView, AUCTION_2: auctionView, DRAFT_ORDER: orderView, DRAFT: draftView, RESULTS: <><h2>Results</h2><p>The season is complete.</p><ExportsPanel seasonId={seasonId} seasonVersion={() => client.expectedVersion()} /></> };
+  const views = { SETUP: setupView, KEEPERS: keepersView, AUCTION_1: auctionView, AUCTION_2: auctionView, DRAFT_ORDER: orderView, DRAFT: draftView, RESULTS: <ResultsPanel seasonId={seasonId} request={api} seasonVersion={() => client.expectedVersion()} /> };
   return <main><header><p className="eyebrow">Local commissioner console</p><h1>Draft night</h1><p role="status">{message}</p></header>
     <section><h2>Season</h2><button disabled={busy} onClick={() => run(async () => { const id = crypto.randomUUID(); await api("/api/setup/seasons", "POST", { seasonId: id, leagueId: `local-league-${id}`, year: new Date().getFullYear(), name: "League Draft", teamCount: 2 }); return activateSeason(id); }, { refresh: false })}>Create two-team season</button><label>Existing season ID <input aria-label="Existing season ID" value={seasonInput} onChange={event => setSeasonInput(event.target.value)} /></label><button disabled={!seasonInput || busy} onClick={() => loadSeason(seasonInput)}>Load season</button></section>
-    {bootstrap && <StageShell bootstrap={bootstrap}>{(access, policy) => <fieldset disabled={busy || !policy.mutationsEnabled}>{views[access.stage]}</fieldset>}</StageShell>}
-    <div id="operations"><OperationsPanel seasonId={seasonId || undefined} seasonVersion={() => client.expectedVersion()} onChanged={() => { if (seasonId) loadSeason(seasonId); }} /></div>
+    <nav aria-label="Workspace"><button type="button" aria-pressed={!operationsOpen} onClick={()=>setOperationsOpen(false)}>Draft night</button><button type="button" aria-pressed={operationsOpen} onClick={()=>setOperationsOpen(true)}>Operations</button></nav>
+    {operationsOpen?<OperationsPanel seasonId={seasonId || undefined} seasonVersion={() => client.expectedVersion()} onChanged={resumeAfterOperation} />:bootstrap && <StageShell bootstrap={bootstrap}>{(access, policy) => <fieldset disabled={busy || !policy.mutationsEnabled}>{views[access.stage]}</fieldset>}</StageShell>}
   </main>;
 }
 createRoot(document.getElementById("root")).render(<SetupApp />);

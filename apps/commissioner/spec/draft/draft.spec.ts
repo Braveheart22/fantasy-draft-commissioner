@@ -44,7 +44,7 @@ describe("permanent draft order", () => {
     const originalRows = readHistory();
     const corrections = new CorrectionService(path, join(dir, "backups"));
     const preview = await corrections.preview(seasonId, "DRAFT_ORDER");
-    corrections.confirm(preview.id, { expectedVersion: preview.seasonVersion, cutHash: preview.cutHash, backupHash: preview.backupHash, confirmation: "CONFIRM ROLLBACK", reason: "Replace incorrect external precedence" });
+    corrections.confirm(preview.id, { seasonId: preview.seasonId, expectedVersion: preview.seasonVersion, cutHash: preview.cutHash, backupHash: preview.backupHash, confirmation: "CONFIRM ROLLBACK", reason: "Replace incorrect external precedence" });
     const historicalRows = readHistory();
     for (const [table, rows] of Object.entries(historicalRows)) {
       expect(rows).toHaveLength(originalRows[table]!.length);
@@ -110,7 +110,7 @@ describe("fixed-order conventional drafting", () => {
     for(let index=0;index<5;index++)await store.makePick(command(seasonId,`REWIND-${index}`),{seasonTeamId:order.order[index%2]!.seasonTeamId,playerId:`p-${index}`,rosterRules:rules});
     await store.close(); const dir=dirs[dirs.length-1]!; const path=join(dir,"db.sqlite"); const db=new Database(path); const pick=db.prepare("SELECT id FROM DraftPick WHERE overallPick=3 AND active=1").get() as {id:string}; db.close();
     const corrections=new CorrectionService(path,join(dir,"backups")); const preview=await corrections.preview(seasonId,"PICK",pick.id);
-    corrections.confirm(preview.id,{expectedVersion:preview.seasonVersion,cutHash:preview.cutHash,backupHash:preview.backupHash,confirmation:"CONFIRM ROLLBACK",reason:"Wrong player at pick three"});
+    corrections.confirm(preview.id,{seasonId:preview.seasonId,expectedVersion:preview.seasonVersion,cutHash:preview.cutHash,backupHash:preview.backupHash,confirmation:"CONFIRM ROLLBACK",reason:"Wrong player at pick three"});
     const resumed=await openSeasonStore(path); const bootstrap=await new BootstrapService(resumed).load(actor,seasonId);
     expect(bootstrap.legalStage).toBe("DRAFT"); expect(bootstrap.phases.draft?.nextOverallPick).toBe(3); expect(bootstrap.phases.draft?.currentSeasonTeamId).toBe(order.order[0]!.seasonTeamId);
     expect(bootstrap.phases.draft?.history.map(item=>item.overallPick)).toEqual([2,1]); expect(bootstrap.phases.draft?.teams.flatMap(team=>team.roster).map(player=>player.playerId).sort()).toEqual(["p-0","p-1"]);

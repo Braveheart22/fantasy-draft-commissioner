@@ -17,6 +17,8 @@ import { LifecycleState } from "../../application/ports/season-repository.js";
 import { PLAYER_POSITIONS, type ImportPreview, type ImportRow, type KeeperStagePlayer, type KeeperStageSummary, type PlayerInput, type SetupRepository, type SetupSummary, type TeamInput } from "../../application/setup/setup-repository.js";
 import type { DraftOrderDecision, DraftOrderRepository, DraftOrderSummary } from "../../application/draft-order/draft-order-repository.js";
 import type { ConventionalDraftRepository, DraftPickInput } from "../../application/conventional-draft/conventional-draft-repository.js";
+import type { ResultsRepository, ResultsSummary } from "../../application/results/results-repository.js";
+import type { OperationsQuery, OperationsRepository, OperationsSummary } from "../../application/operations/operations-repository.js";
 import { canAddPlayerThroughPhase1, validateRosterThroughPhase1 } from "../../integrations/roster-validator-adapter.js";
 import { PrismaClient } from "../../generated/prisma/client.js";
 import { databaseNeedsMigration, migrateDatabaseCopySafely, migrateDatabaseInPlace } from "./migrations.js";
@@ -63,6 +65,20 @@ function revealedBids(bidsJson: string, playerNames: Map<string, string>) {
   return (JSON.parse(bidsJson) as SavedAuctionBid[]).map(bid => ({ ...bid, playerName: playerNames.get(bid.playerId) ?? "Unknown player" }));
 }
 function groupBalances<T extends { remainingBudget: number }>(items: T[]): Map<number, T[]> { const groups = new Map<number, T[]>(); for (const item of items) groups.set(item.remainingBudget, [...(groups.get(item.remainingBudget) ?? []), item]); return groups; }
+function auditStage(event: { commandType: string; beforeJson?: string | null; afterJson?: string | null }): string {
+  const commandType = event.commandType;
+  if (/CORRECTION|BACKUP|RECOVERY|EXPORT/.test(commandType)) return "OPERATIONS";
+  if (/DRAFT_PICK|DRAFT_ORDER|ORDER_TIE/.test(commandType)) return "DRAFT";
+  if (/AUCTION|BID|ROUND_[12]/.test(commandType)) {
+    const payloads = [event.beforeJson, event.afterJson].map(value => { try { return value ? (JSON.parse(value) as { state?: string; roundNumber?: number }) : undefined; } catch { return undefined; } }).filter(Boolean);
+    const state = payloads.map(value => value?.state).find(Boolean);
+    if (payloads.some(value => value?.roundNumber === 2)) return "AUCTION_2";
+    if (state && (/^R2_/.test(state) || ["R1_PUBLISHED", "R2_PUBLISHED", "ORDER_TIE_PAUSED", "ORDER_FINAL", "CONVENTIONAL_DRAFT", "COMPLETED"].includes(state))) return "AUCTION_2";
+    return commandType.includes("ROUND_2") ? "AUCTION_2" : "AUCTION_1";
+  }
+  if (/KEEPER/.test(commandType)) return "KEEPERS";
+  return "SETUP";
+}
 async function requireSelectablePlayer(database: any, seasonId: string, playerId: string) {
   const player = await database.player.findFirst({ where: { id: playerId, seasonId } });
   if (!player) throw new Error(`Player is unavailable: ${playerId}`);
@@ -73,10 +89,87 @@ async function requireSelectablePlayer(database: any, seasonId: string, playerId
   return player;
 }
 
-export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository, CatalogPreparationRepository, PricingRepository, BootstrapRepository {
+export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository, CatalogPreparationRepository, PricingRepository, BootstrapRepository, ResultsRepository, OperationsRepository {
   private queue: Promise<void> = Promise.resolve();
   constructor(private readonly prisma: PrismaClient) {}
   async seasonVersion(seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
+
+  async results(_actor: ActorDescriptor, seasonId: string): Promise<ResultsSummary> {
+    return this.prisma.$transaction(async database => {
+      const season = await database.season.findUnique({ where: { id: seasonId } });
+      if (!season) throw Object.assign(new Error("Season not found"), { statusCode: 404 });
+      const draft = await database.conventionalDraft.findUnique({ where: { seasonId } });
+      const [teams, assignments, picks, backups, exports] = await Promise.all([
+        database.seasonTeam.findMany({ where: { seasonId, active: true }, orderBy: { seedOrder: "asc" } }),
+        database.rosterAssignment.findMany({ where: { seasonId, supersededAt: null }, orderBy: [{ seasonTeamId: "asc" }, { playerId: "asc" }] }),
+        draft ? database.draftPick.findMany({ where: { conventionalDraftId: draft.id, active: true }, orderBy: { overallPick: "asc" } }) : Promise.resolve([]),
+        database.backupRecord.findMany({ where: { seasonId }, orderBy: { verifiedAt: "desc" }, take: 1 }),
+        database.exportRecord.findMany({ where: { seasonId, supersededAt: null }, orderBy: { createdAt: "desc" } }),
+      ]);
+      const referencedPlayerIds = [...new Set([...assignments.map(item => item.playerId), ...picks.map(item => item.playerId)])];
+      const players = await database.player.findMany({ where: { seasonId, id: { in: referencedPlayerIds } }, select: { id: true, name: true, position: true, sourceType: true } });
+      const playerById = new Map(players.map(player => [player.id, player])); const pickById = new Map(picks.map(pick => [pick.id, pick])); const teamById = new Map(teams.map(team => [team.id, team]));
+      return {
+        season: { id: season.id, name: season.name, year: season.year, state: season.state, rowVersion: season.rowVersion },
+        teams: teams.map(team => ({ seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, players: assignments.filter(item => item.seasonTeamId === team.id).map(item => { const player = playerById.get(item.playerId)!; const pick = pickById.get(item.sourceEntityId); return { playerId: player.id, playerName: player.name, position: player.position, sourceType: player.sourceType, acquisitionSource: item.acquisitionSource, ...(item.auctionRound == null ? {} : { auctionRound: item.auctionRound }), ...(item.cost == null ? {} : { cost: item.cost }), ...(pick ? { overallPick: pick.overallPick } : {}) }; }) })),
+        history: picks.map(pick => { const team = teamById.get(pick.seasonTeamId)!; const player = playerById.get(pick.playerId)!; return { overallPick: pick.overallPick, roundNumber: pick.roundNumber, displayName: team.displayName, playerName: player.name, position: player.position }; }),
+        backup: backups[0] ? { available: true, lastVerifiedAt: backups[0].verifiedAt.toISOString(), trigger: backups[0].trigger } : { available: false },
+        exports: exports.map(item => ({ id: item.id, createdAt: item.createdAt.toISOString(), jsonSha256: item.jsonSha256, csvSha256: item.csvSha256 })),
+      };
+    });
+  }
+
+  async operations(_actor: ActorDescriptor, seasonId: string, query: OperationsQuery): Promise<OperationsSummary> {
+    if (!await this.prisma.season.findUnique({ where: { id: seasonId }, select: { id: true } })) throw Object.assign(new Error("Season not found"), { statusCode: 404 });
+    const page = Math.max(1, query.page ?? 1); const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 25));
+    const auditWhere: any = { seasonId };
+    if (query.commandType) auditWhere.commandType = query.commandType;
+    if (query.entityType) auditWhere.entityType = query.entityType;
+    if (query.correlationId) auditWhere.correlationId = query.correlationId;
+    if (query.correctionLineage) auditWhere.OR = [{ commandType: { contains: "CORRECTION" } }, { entityType: "CorrectionAction" }];
+    const unfilteredTotal = query.stage ? undefined : await this.prisma.auditEvent.count({ where: auditWhere });
+    const initialPages = Math.max(1, Math.ceil((unfilteredTotal ?? 0) / pageSize)); const initialPage = Math.min(page, initialPages);
+    const [auditRows, teams, players, keepers, rounds, awards, orderDecisions, draft, priceBatches, manualPrices, catalogBatches, activeCatalogSnapshots, floors, corrections] = await Promise.all([
+      this.prisma.auditEvent.findMany({ where: auditWhere, orderBy: { sequence: "desc" }, ...(query.stage ? {} : { skip: (initialPage - 1) * pageSize, take: pageSize }) }),
+      this.prisma.seasonTeam.findMany({ where: { seasonId } }), this.prisma.player.findMany({ where: { seasonId }, select: { id: true, name: true, position: true, custom: true, supersededAt: true } }),
+      this.prisma.keeperSelection.findMany({ where: { seasonId } }), this.prisma.auctionRound.findMany({ where: { seasonId } }),
+      this.prisma.auctionAward.findMany({ where: { round: { seasonId } } }),
+      this.prisma.draftOrderTieDecision.findMany({ where: { conventionalDraft: { seasonId } } }),
+      this.prisma.conventionalDraft.findUnique({ where: { seasonId } }),
+      this.prisma.pricePreparationBatch.findMany({ where: { seasonId, state: "APPROVED", supersededAt: null } }),
+      this.prisma.playerPriceAssignment.findMany({ where: { seasonId, sourceType: "MANUAL", active: true } }),
+      this.prisma.catalogPreparationBatch.findMany({ where: { seasonId, state: "APPROVED" } }),
+      this.prisma.catalogSnapshot.findMany({ where: { seasonId, state: "APPROVED", supersededAt: null }, select: { id: true } }),
+      this.prisma.positionPriceFloor.findMany({ where: { seasonId, supersededAt: null } }),
+      this.prisma.correctionAction.findMany({ where: { seasonId }, orderBy: { createdAt: "desc" } }),
+    ]);
+    const picks = draft ? await this.prisma.draftPick.findMany({ where: { conventionalDraftId: draft.id }, orderBy: { overallPick: "asc" } }) : [];
+    const teamName = new Map(teams.map(item => [item.id, item.displayName])); const playerName = new Map(players.map(item => [item.id, item.name])); const roundNumber = new Map(rounds.map(item => [item.id, item.roundNumber]));
+    let timeline = auditRows.map(item => ({ sequence: item.sequence, createdAt: item.createdAt.toISOString(), actorLabel: item.actorLabel, commandType: item.commandType, stage: auditStage(item), ...(item.entityType ? { entityType: item.entityType } : {}), ...(item.entityId ? { entityId: item.entityId } : {}), correlationId: item.correlationId, ...(item.reason ? { reason: item.reason } : {}) }));
+    if (query.stage) timeline = timeline.filter(item => item.stage === query.stage);
+    const total = unfilteredTotal ?? timeline.length; const totalPages = Math.max(1, Math.ceil(total / pageSize)); const effectivePage = Math.min(page, totalPages); const items = query.stage ? timeline.slice((effectivePage - 1) * pageSize, effectivePage * pageSize) : timeline;
+    const state = (supersededAt: Date | null | undefined, active = true): "ACTIVE" | "SUPERSEDED" => supersededAt || !active ? "SUPERSEDED" : "ACTIVE";
+    let records = [
+      ...keepers.map(item => ({ kind: "Keeper", id: item.id, label: `${teamName.get(item.seasonTeamId)} · ${playerName.get(item.playerId)}`, detail: `$${item.cost} keeper`, state: state(item.supersededAt), correctionType: "KEEPER", targetId: item.id })),
+      ...rounds.map(item => ({ kind: "Auction round", id: item.id, label: `Round ${item.roundNumber} · ${item.status}`, detail: item.publishedAt ? "Published" : "Not published", state: state(item.supersededAt), correctionType: "AUCTION_REOPEN", targetId: item.id })),
+      ...awards.map(item => ({ kind: "Auction award", id: item.id, label: `Round ${roundNumber.get(item.roundId)} · ${playerName.get(item.playerId)} → ${teamName.get(item.seasonTeamId)}`, detail: `$${item.amount}`, state: state(item.supersededAt) })),
+      ...orderDecisions.map(item => ({ kind: "Order decision", id: item.id, label: `$${item.balance} tie · ${item.method}`, detail: "External precedence", state: state(item.supersededAt), correctionType: "DRAFT_ORDER", targetId: draft?.id })),
+      ...picks.map(item => ({ kind: "Draft pick", id: item.id, label: `Pick ${item.overallPick} · ${playerName.get(item.playerId)} → ${teamName.get(item.seasonTeamId)}`, detail: `Round ${item.roundNumber}`, state: state(item.supersededAt, item.active), correctionType: "PICK", targetId: item.id })),
+      ...corrections.map(item => ({ kind: "Correction", id: item.id, label: `${item.correctionType} · ${item.confirmedAt ? "Confirmed" : "Preview"}`, detail: item.reason ?? "Awaiting confirmation", state: state(item.supersededAt), correctionType: item.correctionType, ...(item.targetId ? { targetId: item.targetId } : {}) })),
+    ];
+    if (query.recordState) records = records.filter(item => item.state === query.recordState);
+    const correctionTargets = [
+      ...catalogBatches.filter(item => activeCatalogSnapshots.some(snapshot => snapshot.id === item.id)).map(item => ({ correctionType: "CATALOG_BATCH", targetId: item.id, label: `Catalog · ${item.sourceNamespace}`, detail: `${item.rowCount} approved rows` })),
+      ...players.filter(item => item.custom && !item.supersededAt && [...keepers, ...awards, ...picks].some(record => record.playerId === item.id)).map(item => ({ correctionType: "CUSTOM_PLAYER", targetId: item.id, label: `Custom player · ${item.name}`, detail: item.position })),
+      ...(floors.length ? [{ correctionType: "POSITION_FLOORS", label: "Positional price floors", detail: `${floors.length} active floors` }] : []),
+      ...priceBatches.map(item => ({ correctionType: "PRICE_BATCH", targetId: item.id, label: `Price list · ${item.sourceLabel}`, detail: `${item.rowCount} approved rows` })),
+      ...manualPrices.map(item => ({ correctionType: "MANUAL_PRICE", targetId: item.id, label: `Manual price · ${playerName.get(item.playerId)}`, detail: `$${item.minimumBid} · ${item.sourceLabel}` })),
+      ...picks.filter(item => item.active).map(item => ({ correctionType: "PICK", targetId: item.id, label: `Pick ${item.overallPick} · ${playerName.get(item.playerId)} → ${teamName.get(item.seasonTeamId)}`, detail: `Round ${item.roundNumber}` })),
+      ...rounds.filter(item => !item.supersededAt).map(item => ({ correctionType: "AUCTION_REOPEN", targetId: item.id, label: `Auction round ${item.roundNumber}`, detail: item.status })),
+      ...(draft ? [{ correctionType: "DRAFT_ORDER", targetId: draft.id, label: "Permanent draft order", detail: draft.status }] : []),
+    ];
+    return { timeline: { items, page: effectivePage, pageSize, total, totalPages }, records, correctionTargets };
+  }
 
   execute<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T> {
     const run = this.queue.then(() => this.executeNow(metadata, operation));
@@ -141,7 +234,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const [teams, players, floors, rounds, draft] = await Promise.all([
         database.seasonTeam.findMany({ where: { seasonId }, include: { keeper: true }, orderBy: { seedOrder: "asc" } }),
         database.player.findMany({ where: { seasonId }, orderBy: [{ name: "asc" }, { id: "asc" }] }),
-        database.positionPriceFloor.findMany({ where: { seasonId } }),
+        database.positionPriceFloor.findMany({ where: { seasonId, supersededAt: null } }),
         database.auctionRound.findMany({ where: { seasonId, supersededAt: null }, orderBy: { roundNumber: "asc" } }),
         database.conventionalDraft.findUnique({ where: { seasonId } }),
       ]);
@@ -438,7 +531,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
         player ??= await database.player.findFirst({ where: { seasonId: metadata.seasonId, sourceNamespace: batch.sourceNamespace, externalId: row.externalId } });
         const owned = player ? Boolean(await database.rosterAssignment.findFirst({ where: { seasonId: metadata.seasonId, playerId: player.id, supersededAt: null }, select: { id: true } })) : false;
         const available = !owned && row.providerActive && row.leagueSelectable;
-        const data = { name: row.name, position: row.position, nflTeam: row.nflTeam, providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable, normalizedSearchText: normalizeSearchText(row.name), sourceUpdatedAt: row.sourceUpdatedAt, activeImportBatchId: batch.id, catalogSnapshotId: batch.id, available };
+        const data = { name: row.name, position: row.position, nflTeam: row.nflTeam, providerStatus: row.providerStatus, providerActive: row.providerActive, leagueSelectable: row.leagueSelectable, normalizedSearchText: normalizeSearchText(row.name), sourceUpdatedAt: row.sourceUpdatedAt, activeImportBatchId: batch.id, catalogSnapshotId: batch.id, supersededAt: null, available };
         if (player) player = await database.player.update({ where: { id: player.id }, data });
         else player = await database.player.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, sourceType: "NFL", sourceNamespace: batch.sourceNamespace, externalId: row.externalId, custom: false, ...data } });
         for (const alias of aliases) {
@@ -500,16 +593,16 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   }
   async stagePriceList(metadata:CommandMetadata,sourceLabel:string,format:PriceListFormat,normalized:NormalizedPriceList):Promise<PricePreparationView>{await this.assertSetup(metadata.seasonId);if(!sourceLabel.trim())throw new Error("Price source label is required");const prior=await this.prisma.pricePreparationBatch.findUnique({where:{seasonId_sourceHash:{seasonId:metadata.seasonId,sourceHash:normalized.sourceHash}}});if(prior)return this.pricePreparation(metadata.actor,metadata.seasonId,prior.id);const id=await this.setupCommand(metadata,async database=>{const season=await database.season.findUniqueOrThrow({where:{id:metadata.seasonId}});const players=await database.player.findMany({where:{seasonId:metadata.seasonId},include:{aliases:true}});const batchId=randomUUID();await database.pricePreparationBatch.create({data:{id:batchId,seasonId:metadata.seasonId,sourceLabel:sourceLabel.trim(),format,sourceHash:normalized.sourceHash,normalizedHash:normalized.normalizedHash,expectedSeasonVersion:season.rowVersion+1,state:"STAGED",rowCount:normalized.rows.length}});const rows=normalized.rows.map(row=>{const stable=row.sourceNamespace&&row.sourceId?players.find(player=>player.aliases.some(alias=>alias.sourceNamespace===row.sourceNamespace&&alias.sourceId===row.sourceId)):undefined;const candidates=players.filter(player=>normalizeSearchText(player.name)===normalizeSearchText(row.name)&&player.position===row.position&&(!row.nflTeam||player.nflTeam===row.nflTeam));const matched=stable??(candidates.length===1?candidates[0]:undefined);const matchKind=stable?"STABLE_ID":candidates.length===1?"CONTEXT_PROPOSAL":candidates.length>1?"AMBIGUOUS":"UNMATCHED";return{id:randomUUID(),batchId,rowNumber:row.rowNumber,sourceNamespace:row.sourceNamespace??null,sourceId:row.sourceId??null,name:row.name,nflTeam:row.nflTeam??null,position:row.position,minimumBid:row.minimumBid,matchKind,matchedPlayerId:matched?.id??null,resolutionPlayerId:stable?.id??null,disposition:stable?"AUTO":null,reviewMessage:matchKind==="CONTEXT_PROPOSAL"?`Confirm ${matched!.name}`:matchKind==="AMBIGUOUS"?"Multiple players match this row":matchKind==="UNMATCHED"?"No player matches this row":null};});if(rows.length)await database.pricePreparationRow.createMany({data:rows});await database.season.update({where:{id:metadata.seasonId},data:{rowVersion:{increment:1}}});return batchId;});return this.pricePreparation(metadata.actor,metadata.seasonId,id);}
   async setPriceDisposition(metadata:CommandMetadata,batchId:string,rowNumber:number,resolutionPlayerId:string):Promise<PricePreparationView>{await this.assertSetup(metadata.seasonId);await this.setupCommand(metadata,async database=>{const batch=await database.pricePreparationBatch.findFirst({where:{id:batchId,seasonId:metadata.seasonId,state:"STAGED"}});if(!batch)throw new Error("Active price preparation not found");const player=await database.player.findFirst({where:{id:resolutionPlayerId,seasonId:metadata.seasonId}});if(!player)throw new Error("Resolution player not found");const season=await database.season.update({where:{id:metadata.seasonId},data:{rowVersion:{increment:1}}});await database.pricePreparationRow.update({where:{batchId_rowNumber:{batchId,rowNumber}},data:{disposition:"ACCEPT_MATCH",resolutionPlayerId}});await database.pricePreparationBatch.update({where:{id:batchId},data:{expectedSeasonVersion:season.rowVersion}});});return this.pricePreparation(metadata.actor,metadata.seasonId,batchId);}
-  private async recomputePriceProjection(database:any,seasonId:string,playerIds:string[]){const floors=new Map((await database.positionPriceFloor.findMany({where:{seasonId}})).map((floor:any)=>[floor.position,floor.minimumBid]));for(const playerId of playerIds){const player=await database.player.findUniqueOrThrow({where:{id:playerId}});const assignments=await database.playerPriceAssignment.findMany({where:{seasonId,playerId,active:true},orderBy:{createdAt:"desc"}});const assignment=assignments.find((item:any)=>item.sourceType==="MANUAL")??assignments.find((item:any)=>item.sourceType==="LIST")??assignments.find((item:any)=>item.sourceType==="LEGACY");await database.player.update({where:{id:playerId},data:{explicitMinimumBid:assignment?.minimumBid??null}});if(!assignment&&!floors.has(player.position))continue;}}
+  private async recomputePriceProjection(database:any,seasonId:string,playerIds:string[]){const floors=new Map((await database.positionPriceFloor.findMany({where:{seasonId,supersededAt:null}})).map((floor:any)=>[floor.position,floor.minimumBid]));for(const playerId of playerIds){const player=await database.player.findUniqueOrThrow({where:{id:playerId}});const assignments=await database.playerPriceAssignment.findMany({where:{seasonId,playerId,active:true},orderBy:{createdAt:"desc"}});const assignment=assignments.find((item:any)=>item.sourceType==="MANUAL")??assignments.find((item:any)=>item.sourceType==="LIST")??assignments.find((item:any)=>item.sourceType==="LEGACY");await database.player.update({where:{id:playerId},data:{explicitMinimumBid:assignment?.minimumBid??null}});if(!assignment&&!floors.has(player.position))continue;}}
   async approvePriceList(metadata:CommandMetadata,batchId:string):Promise<{batchId:string;assignedCount:number}>{await this.assertSetup(metadata.seasonId);return this.setupCommand(metadata,async database=>{const batch=await database.pricePreparationBatch.findFirst({where:{id:batchId,seasonId:metadata.seasonId},include:{rows:true}});if(!batch||batch.state!=="STAGED")throw new Error("Active price preparation not found");const season=await database.season.findUniqueOrThrow({where:{id:metadata.seasonId}});if(batch.expectedSeasonVersion!==season.rowVersion)throw new Error("Stale price batch");if(batch.rows.some(row=>row.matchKind!=="STABLE_ID"&&!row.disposition))throw new Error("Price approval has unresolved rows");const resolved=batch.rows.map(row=>({row,playerId:row.resolutionPlayerId??row.matchedPlayerId}));if(resolved.some(item=>!item.playerId))throw new Error("Price row has no resolved player");if(new Set(resolved.map(item=>item.playerId)).size!==resolved.length)throw new Error("Multiple price rows resolve to one player");await database.playerPriceAssignment.updateMany({where:{seasonId:metadata.seasonId,sourceType:"LIST",active:true},data:{active:false,supersededAt:new Date()}});await database.pricePreparationBatch.updateMany({where:{seasonId:metadata.seasonId,state:"APPROVED",supersededAt:null},data:{state:"SUPERSEDED",supersededAt:new Date()}});await database.playerPriceAssignment.createMany({data:resolved.map(({row,playerId})=>({id:randomUUID(),seasonId:metadata.seasonId,playerId:playerId!,minimumBid:row.minimumBid,sourceType:"LIST",sourceLabel:batch.sourceLabel,sourceBatchId:batch.id,active:true}))});const allPlayers=(await database.player.findMany({where:{seasonId:metadata.seasonId},select:{id:true}})).map(item=>item.id);await this.recomputePriceProjection(database,metadata.seasonId,allPlayers);await database.pricePreparationBatch.update({where:{id:batch.id},data:{state:"APPROVED",approvedAt:new Date()}});await database.season.update({where:{id:metadata.seasonId},data:{rowVersion:{increment:1}}});return{batchId,assignedCount:resolved.length};});}
   async setManualPrice(metadata:CommandMetadata,playerId:string,minimumBid?:number):Promise<void>{await this.assertSetup(metadata.seasonId);if(minimumBid!==undefined)positiveDollar(minimumBid,"Manual minimum");await this.setupCommand(metadata,async database=>{const player=await database.player.findFirst({where:{id:playerId,seasonId:metadata.seasonId}});if(!player)throw new Error("Player not found");await database.playerPriceAssignment.updateMany({where:{seasonId:metadata.seasonId,playerId,sourceType:{in:["MANUAL","LEGACY"]},active:true},data:{active:false,supersededAt:new Date()}});if(minimumBid!==undefined)await database.playerPriceAssignment.create({data:{id:randomUUID(),seasonId:metadata.seasonId,playerId,minimumBid,sourceType:"MANUAL",sourceLabel:"Commissioner override"}});await this.recomputePriceProjection(database,metadata.seasonId,[playerId]);await database.season.update({where:{id:metadata.seasonId},data:{rowVersion:{increment:1}}});});}
-  async pricingSummary(_actor:ActorDescriptor,seasonId:string):Promise<PricingSummary>{const[players,floors,assignments,unresolved]=await Promise.all([this.prisma.player.findMany({where:{seasonId},orderBy:[{name:"asc"},{id:"asc"}]}),this.prisma.positionPriceFloor.findMany({where:{seasonId}}),this.prisma.playerPriceAssignment.findMany({where:{seasonId,active:true},orderBy:{createdAt:"desc"}}),this.prisma.pricePreparationBatch.count({where:{seasonId,state:"STAGED"}})]);const floorMap=Object.fromEntries(floors.map(floor=>[floor.position,floor.minimumBid]));const priced:PricingSummary["players"]=players.map(player=>{const own=assignments.filter(item=>item.playerId===player.id);const assignment=own.find(item=>item.sourceType==="MANUAL")??own.find(item=>item.sourceType==="LIST")??own.find(item=>item.sourceType==="LEGACY");const floor=floorMap[player.position];return{playerId:player.id,name:player.name,position:player.position,...(assignment?{minimumBid:assignment.minimumBid,source:assignment.sourceType as "MANUAL"|"LIST"|"LEGACY",sourceLabel:assignment.sourceLabel}:floor!==undefined?{minimumBid:floor,source:"FLOOR" as const,sourceLabel:`${player.position} floor`}:{source:"MISSING" as const,sourceLabel:"Missing price"})};});return{floors:floorMap,players:priced,preflight:{pricedCount:priced.filter(item=>item.minimumBid!==undefined).length,missingCount:priced.filter(item=>item.minimumBid===undefined).length,unresolvedBatchCount:unresolved}};}
+  async pricingSummary(_actor:ActorDescriptor,seasonId:string):Promise<PricingSummary>{const[players,floors,assignments,unresolved]=await Promise.all([this.prisma.player.findMany({where:{seasonId},orderBy:[{name:"asc"},{id:"asc"}]}),this.prisma.positionPriceFloor.findMany({where:{seasonId,supersededAt:null}}),this.prisma.playerPriceAssignment.findMany({where:{seasonId,active:true},orderBy:{createdAt:"desc"}}),this.prisma.pricePreparationBatch.count({where:{seasonId,state:"STAGED"}})]);const floorMap=Object.fromEntries(floors.map(floor=>[floor.position,floor.minimumBid]));const priced:PricingSummary["players"]=players.map(player=>{const own=assignments.filter(item=>item.playerId===player.id);const assignment=own.find(item=>item.sourceType==="MANUAL")??own.find(item=>item.sourceType==="LIST")??own.find(item=>item.sourceType==="LEGACY");const floor=floorMap[player.position];return{playerId:player.id,name:player.name,position:player.position,...(assignment?{minimumBid:assignment.minimumBid,source:assignment.sourceType as "MANUAL"|"LIST"|"LEGACY",sourceLabel:assignment.sourceLabel}:floor!==undefined?{minimumBid:floor,source:"FLOOR" as const,sourceLabel:`${player.position} floor`}:{source:"MISSING" as const,sourceLabel:"Missing price"})};});return{floors:floorMap,players:priced,preflight:{pricedCount:priced.filter(item=>item.minimumBid!==undefined).length,missingCount:priced.filter(item=>item.minimumBid===undefined).length,unresolvedBatchCount:unresolved}};}
 
   async setPriceFloors(metadata: CommandMetadata, floors: Record<string, number>): Promise<void> {
     await this.assertSetup(metadata.seasonId);
     for (const [position, floor] of Object.entries(floors)) { if (!PLAYER_POSITIONS.includes(position as never)) throw new Error(`Unknown position: ${position}`); positiveDollar(floor, `${position} minimum`); }
     await this.setupCommand(metadata, async database => {
-      await database.positionPriceFloor.deleteMany({ where: { seasonId: metadata.seasonId } });
+      await database.positionPriceFloor.updateMany({ where: { seasonId: metadata.seasonId, supersededAt: null }, data: { supersededAt: new Date() } });
       for (const [position, minimumBid] of Object.entries(floors)) await database.positionPriceFloor.create({ data: { id: randomUUID(), seasonId: metadata.seasonId, position, minimumBid } });
       await database.season.update({ where: { id: metadata.seasonId }, data: { rowVersion: { increment: 1 } } });
     });
@@ -580,7 +673,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     const [teams, players, floors] = await Promise.all([
       this.prisma.seasonTeam.findMany({ where: { seasonId }, include: { keeper: true }, orderBy: { seedOrder: "asc" } }),
       this.prisma.player.findMany({ where: { seasonId }, orderBy: [{ name: "asc" }, { id: "asc" }] }),
-      this.prisma.positionPriceFloor.findMany({ where: { seasonId } }),
+      this.prisma.positionPriceFloor.findMany({ where: { seasonId, supersededAt: null } }),
     ]);
     const floorMap = Object.fromEntries(floors.map(floor => [floor.position, floor.minimumBid]));
     return { season, teams: teams.map(team => ({ id: team.teamId, seasonTeamId: team.id, displayName: team.displayName, seedOrder: team.seedOrder, ...(team.keeper ? { keeperPlayerId: team.keeper.playerId } : {}), startingBudget: team.keeper ? 300 : 350 })), players: players.map(player => { const minimumBid = player.explicitMinimumBid ?? floorMap[player.position]; return ({ id: player.id, name: player.name, position: player.position as PlayerInput["position"], sourceType: player.sourceType as PlayerInput["sourceType"], ...(player.sourceNamespace ? { sourceNamespace: player.sourceNamespace } : {}), ...(player.externalId ? { externalId: player.externalId } : {}), ...(player.explicitMinimumBid == null ? {} : { explicitMinimumBid: player.explicitMinimumBid }), ...(minimumBid === undefined ? {} : { minimumBid }), available: player.available, keeperEligible: player.keeperEligible }); }), floors: floorMap };
@@ -591,7 +684,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     if (!season) throw new Error(`Season not found: ${seasonId}`);
     const [teams, floors, unresolvedPriceReviewCount] = await Promise.all([
       this.prisma.seasonTeam.findMany({ where: { seasonId }, include: { keeper: true }, orderBy: { seedOrder: "asc" } }),
-      this.prisma.positionPriceFloor.findMany({ where: { seasonId } }),
+      this.prisma.positionPriceFloor.findMany({ where: { seasonId, supersededAt: null } }),
       this.prisma.pricePreparationBatch.count({ where: { seasonId, state: "STAGED" } }),
     ]);
     const selectedPlayerIds = teams.flatMap(team => team.keeper ? [team.keeper.playerId] : []);
@@ -750,7 +843,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     const positions = [...new Set(players.map(player => player.position))];
     const [priceAssignments, floors, assignments] = await Promise.all([
       this.prisma.playerPriceAssignment.findMany({ where: { seasonId, playerId: { in: playerIds }, active: true }, orderBy: { createdAt: "desc" } }),
-      this.prisma.positionPriceFloor.findMany({ where: { seasonId, position: { in: positions } } }),
+      this.prisma.positionPriceFloor.findMany({ where: { seasonId, position: { in: positions }, supersededAt: null } }),
       this.prisma.rosterAssignment.findMany({ where: { seasonId, playerId: { in: playerIds }, supersededAt: null } }),
     ]);
     const teamIds = [...new Set(assignments.map(item => item.seasonTeamId))];
@@ -846,7 +939,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       if (team.seasonId !== metadata.seasonId) throw new Error("Team does not belong to season");
       const seen = new Set<string>();
       const balance = bids.length === 0 ? null : await database.teamAuctionBalance.findUniqueOrThrow({ where: { seasonId_seasonTeamId_roundNumber: { seasonId: metadata.seasonId, seasonTeamId, roundNumber } } });
-      const floors = bids.length === 0 ? new Map<string, number>() : new Map((await database.positionPriceFloor.findMany({ where: { seasonId: metadata.seasonId } })).map(floor => [floor.position, floor.minimumBid]));
+      const floors = bids.length === 0 ? new Map<string, number>() : new Map((await database.positionPriceFloor.findMany({ where: { seasonId: metadata.seasonId, supersededAt: null } })).map(floor => [floor.position, floor.minimumBid]));
       for (const bid of bids) {
         if (seen.has(bid.playerId)) throw new Error("A team cannot bid on the same player twice"); seen.add(bid.playerId);
         const player = await requireSelectablePlayer(database, metadata.seasonId, bid.playerId);
@@ -867,7 +960,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     const submission = await this.prisma.auctionSubmission.findUniqueOrThrow({ where: { roundId_seasonTeamId: { roundId: round.id, seasonTeamId } } });
     const bids = JSON.parse(submission.bidsJson) as SavedAuctionBid[];
     const players = bids.length ? await this.prisma.player.findMany({ where: { seasonId, id: { in: bids.map(bid => bid.playerId) } } }) : [];
-    const floors = bids.length ? await this.prisma.positionPriceFloor.findMany({ where: { seasonId } }) : [];
+    const floors = bids.length ? await this.prisma.positionPriceFloor.findMany({ where: { seasonId, supersededAt: null } }) : [];
     const playersById = new Map(players.map(player => [player.id, player]));
     const floorByPosition = new Map(floors.map(floor => [floor.position, floor.minimumBid]));
     return { seasonTeamId, status: submission.status as AuctionSubmissionStatus, bidCount: submission.bidCount, zeroConfirmed: submission.zeroConfirmed, bids: bids.map(bid => { const player = playersById.get(bid.playerId); if (!player) throw new Error(`Saved bid player is missing: ${bid.playerId}`); const minimumBid = player.explicitMinimumBid ?? floorByPosition.get(player.position); return { ...bid, playerName: player.name, position: player.position, ...(minimumBid === undefined ? {} : { minimumBid }) }; }) };
@@ -905,7 +998,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   private async buildAuctionInput(database: any, seasonId: string, roundNumber: AuctionRoundNumber, rosterRules: CommissionerAuctionInput["rosterRules"], tiePrecedence: CommissionerAuctionInput["tiePrecedence"]): Promise<CommissionerAuctionInput> {
     const round = await database.auctionRound.findFirstOrThrow({ where: { seasonId, roundNumber, supersededAt: null } });
     const [teams, players, floors, submissions, balances, assignments] = await Promise.all([
-      database.seasonTeam.findMany({ where: { seasonId, active: true }, orderBy: { seedOrder: "asc" } }), database.player.findMany({ where: { seasonId } }), database.positionPriceFloor.findMany({ where: { seasonId } }), database.auctionSubmission.findMany({ where: { roundId: round.id } }), database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber } }), database.rosterAssignment.findMany({ where: { seasonId, supersededAt: null } }),
+      database.seasonTeam.findMany({ where: { seasonId, active: true }, orderBy: { seedOrder: "asc" } }), database.player.findMany({ where: { seasonId } }), database.positionPriceFloor.findMany({ where: { seasonId, supersededAt: null } }), database.auctionSubmission.findMany({ where: { roundId: round.id } }), database.teamAuctionBalance.findMany({ where: { seasonId, roundNumber } }), database.rosterAssignment.findMany({ where: { seasonId, supersededAt: null } }),
     ]);
     const floorMap = Object.fromEntries(floors.map((f: any) => [f.position, f.minimumBid])); const balanceMap = new Map(balances.map((b: any) => [b.seasonTeamId, b.startingBudget])); const submissionMap = new Map(submissions.map((s: any) => [s.seasonTeamId, s])); const assignmentsByTeam = new Map<string, string[]>();
     for (const assignment of assignments) assignmentsByTeam.set(assignment.seasonTeamId, [...(assignmentsByTeam.get(assignment.seasonTeamId) ?? []), assignment.playerId]);

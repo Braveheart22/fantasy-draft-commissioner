@@ -30,7 +30,7 @@ export function StageShell({ bootstrap, children }) {
       return <a key={id} href={`#stage/${id}`} aria-current={id === access.stage ? "page" : undefined} onClick={event => { const request = new CustomEvent("stage-navigation-request", { cancelable: true, detail: { stage: id, href: `stage/${id}` } }); if (!dispatchEvent(request)) event.preventDefault(); }}>{label}</a>;
     })}</nav>
     {access.explanation && <p role="note">{access.explanation}</p>}
-    {access.mode === "READ_ONLY" && <a href="#operations">Preview a correction in Operations</a>}
+    {access.mode === "READ_ONLY" && <button type="button" onClick={() => dispatchEvent(new CustomEvent("open-operations"))}>Preview a correction in Operations</button>}
     <section aria-label={`${stages.find(([id]) => id === access.stage)?.[1]} stage`} data-stage={access.stage} data-mode={access.mode}>{children(access, policy)}</section>
   </>;
 }

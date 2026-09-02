@@ -9,6 +9,7 @@ describe("commissioner stage UI control contract", () => {
       readFile(new URL("../../src/ui/stages/auction/auction-panel.jsx", import.meta.url), "utf8"),
       readFile(new URL("../../src/ui/stages/draft-order/draft-order-panel.jsx", import.meta.url), "utf8"),
       readFile(new URL("../../src/ui/stages/draft/draft-panel.jsx", import.meta.url), "utf8"),
+      readFile(new URL("../../src/ui/stages/results/results-panel.jsx", import.meta.url), "utf8"),
     ])).join("\n");
     for (const label of [
       "Create two-team season", "Existing season ID", "Load season",
@@ -21,6 +22,7 @@ describe("commissioner stage UI control contract", () => {
       "Available player", "Commit legal pick",
     ]) expect(source).toContain(label);
     expect(source).toContain("<OperationsPanel");
+    expect(source).toContain("<ResultsPanel");
     expect(source).toContain("<ExportsPanel");
   });
 });

@@ -59,8 +59,9 @@ export function createSeasonActivation(client, initialSnapshot = null) {
       if (ownRequest === requestNumber) {
         snapshot = candidate;
         client.activateVersion(candidate.season.rowVersion);
+        return candidate;
       }
-      return candidate;
+      return null;
     },
   };
 }
