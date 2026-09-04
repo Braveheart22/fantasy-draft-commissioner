@@ -206,8 +206,11 @@ test("direct future navigation redirects and completed stages expose no normal m
 
   await page.getByRole("link", { name: "Setup" }).click();
   await expect(page.locator('[data-stage="SETUP"][data-mode="READ_ONLY"]')).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add teams" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Set $1 floors" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save teams" })).toBeDisabled();
+  const floorButtons = page.getByRole("button", { name: "Save positional floors" });
+  await expect(floorButtons).toHaveCount(2);
+  await expect(floorButtons.nth(0)).toBeDisabled();
+  await expect(floorButtons.nth(1)).toBeDisabled();
   await page.getByRole("button", { name: "Preview a correction in Operations" }).click();
   await expect(page.getByRole("heading", { name: "Operations", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open round 1" })).toHaveCount(0);

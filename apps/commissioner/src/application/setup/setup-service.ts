@@ -12,6 +12,7 @@ export class SetupService {
     const id = input.seasonId ?? randomUUID();
     return this.seasons.execute({ ...metadata, seasonId: id }, tx => tx.createSeason({ id, leagueId: input.leagueId, year: input.year, name: input.name, teamCount: input.teamCount }));
   }
+  hasExecutedCommand(metadata: Pick<CommandMetadata, "actor" | "seasonId" | "idempotencyKey">) { return this.seasons.hasExecutedCommand(metadata.actor, metadata.seasonId, metadata.idempotencyKey); }
   configureTeams(metadata: CommandMetadata, teams: TeamInput[]) { return this.setup.configureTeams(metadata, teams); }
   addCustomPlayer(metadata: CommandMetadata, player: PlayerInput) { return this.setup.addCustomPlayer(metadata, player); }
   previewImport(metadata: CommandMetadata, namespace: string, content: string, format: "csv" | "json") { return this.setup.previewImport(metadata.actor, metadata.seasonId, namespace, content, format); }

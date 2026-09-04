@@ -38,6 +38,7 @@ export interface SeasonTransaction {
 
 export interface SeasonRepository {
   execute<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T>;
+  hasExecutedCommand(actor: ActorDescriptor, seasonId: string, idempotencyKey: string): Promise<boolean>;
   getSeason(actor: ActorDescriptor, seasonId: string): Promise<SeasonRecord | undefined>;
   listSeasons(actor: ActorDescriptor): Promise<SeasonRecord[]>;
 }

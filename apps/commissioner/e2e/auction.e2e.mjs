@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createDemoSeason, loadSeason } from "./demo-profile.mjs";
 
 test("both auction rounds lock, reveal, resolve forced tie, resume, publish, and derive Round 2 budgets", async ({ request }) => {
   let serial = 0; let version; const seasonId = `auction-e2e-${Date.now()}`; const headers = (data,method,path) => ({ ...(data === undefined ? {} : { "content-type": "application/json" }), "idempotency-key": `e2e-${++serial}`, ...(version!==undefined&&method!=="GET"&&path!=="/api/setup/seasons"?{"x-expected-season-version":String(version)}:{}) });
@@ -21,17 +22,9 @@ test("both auction rounds lock, reveal, resolve forced tie, resume, publish, and
   expect((await send("POST", `/api/auction/${seasonId}/2/lock`, {})).status).toBe("RESOLVED"); expect((await send("POST", `/api/auction/${seasonId}/2/publish`)).status).toBe("PUBLISHED");
 });
 
-test("commissioner privately saves, rehydrates, finalizes, reveals, and publishes both auction rounds by player name", async ({ page }) => {
-  await page.goto("/");
-  const run = async name => {
-    await page.getByRole("button", { name, exact: true }).click();
-    await expect(page.getByText("Saving…")).toBeVisible();
-    await expect(page.getByText("Saved")).toBeVisible();
-  };
-  await run("Create two-team season");
-  await run("Add teams");
-  await run("Add Eddie Gallagher");
-  await run("Set $1 floors");
+test("commissioner privately saves, rehydrates, finalizes, reveals, and publishes both auction rounds by player name", async ({ page, request }) => {
+  const { seasonId: demoSeasonId } = await createDemoSeason(request, "PREPARED");
+  await loadSeason(page, demoSeasonId);
   await page.getByLabel("I reviewed every team and confirm keeper lock").check();
   await page.getByRole("button", { name: "Lock reviewed keepers" }).click();
   await page.getByRole("button", { name: "Open round 1" }).click();

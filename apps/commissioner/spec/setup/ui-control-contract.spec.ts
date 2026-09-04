@@ -12,8 +12,9 @@ describe("commissioner stage UI control contract", () => {
       readFile(new URL("../../src/ui/stages/results/results-panel.jsx", import.meta.url), "utf8"),
     ])).join("\n");
     for (const label of [
-      "Create two-team season", "Existing season ID", "Load season",
-      "Add teams", "Add Eddie Gallagher", "Import sample NFL players", "Set $1 floors",
+      "Create season", "Existing season ID", "Load season",
+      "Team names, one per line", "Save teams", "Custom player name", "Add custom player",
+      "Default positional floor", "Save positional floors",
       "<KeepersPanel", "Lock reviewed keepers",
       "Open round {roundNumber}", "Priority ${index + 1} player", "Save draft", "Finalize zero bids",
       "Finalize saved draft", "Lock, resolve & reveal round {roundNumber}",
@@ -24,5 +25,6 @@ describe("commissioner stage UI control contract", () => {
     expect(source).toContain("<OperationsPanel");
     expect(source).toContain("<ResultsPanel");
     expect(source).toContain("<ExportsPanel");
+    for (const demoOnly of ["Create two-team season", "Add Eddie Gallagher", "Import sample NFL players", "Set $1 floors"]) expect(source).not.toContain(demoOnly);
   });
 });

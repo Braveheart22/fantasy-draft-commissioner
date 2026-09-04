@@ -177,6 +177,10 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     return run;
   }
 
+  async hasExecutedCommand(actor: ActorDescriptor, seasonId: string, idempotencyKey: string) {
+    return (await this.prisma.auditEvent.count({ where: { seasonId, actorType: actor.type, idempotencyKey } })) > 0;
+  }
+
   private async executeNow<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T> {
     const duplicate = await this.prisma.auditEvent.findUnique({ where: { seasonId_actorType_idempotencyKey: { seasonId: metadata.seasonId, actorType: metadata.actor.type, idempotencyKey: metadata.idempotencyKey } }, select: { resultJson: true } });
     if (duplicate?.resultJson != null) return JSON.parse(duplicate.resultJson) as T;

@@ -51,6 +51,7 @@ export interface CommissionerServerOptions {
   port?: number;
   dataDirectory?: string;
   sleeperSource?: CatalogSource;
+  registerProfileRoutes?: (server: FastifyInstance, services: { setup: SetupService }) => Promise<void>;
 }
 
 async function registerBuiltUi(server: FastifyInstance) {
@@ -90,6 +91,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   await registerOperationsRoutes(server, { backup: new ManualBackupService(databasePath, backupDirectory, backupCoordinator), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), queries: new OperationsService(store) });
   await registerResultsRoutes(server, new ResultsService(store));
   await registerExportRoutes(server,new ExportService(databasePath,backupDirectory),join(dataDirectory,"exports"));
+  await options.registerProfileRoutes?.(server, { setup });
   await registerBuiltUi(server);
   try {
     await server.listen({ host: LOOPBACK_HOST, port: options.port ?? 4173 });
