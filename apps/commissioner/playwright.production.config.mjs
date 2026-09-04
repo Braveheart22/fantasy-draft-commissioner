@@ -11,9 +11,9 @@ export default defineConfig({
   testMatch: "*.e2e.mjs",
   use: { baseURL },
   webServer: {
-    command: "node dist/src/server/main.js",
+    command: "node scripts/start-packaged-e2e.mjs",
     url: `${baseURL}/health`,
     reuseExistingServer: false,
-    env: { LEAGUE_DRAFT_PORT: String(port), LEAGUE_DRAFT_DATA_DIR: join(tmpdir(), `commissioner-production-e2e-${process.pid}`) },
+    env: { LEAGUE_DRAFT_PORT: String(port), COMMISSIONER_PRODUCTION_E2E_CONTROL_PORT: String(port + 1000), LEAGUE_DRAFT_DATA_DIR: join(tmpdir(), `commissioner-production-e2e-${process.pid}`) },
   },
 });
