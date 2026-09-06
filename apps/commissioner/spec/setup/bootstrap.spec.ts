@@ -7,7 +7,7 @@ import { LifecycleState } from "../../src/application/ports/season-repository.js
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { startCommissionerServer } from "../../src/server/startup.js";
 
-const actor = { type: "COMMISSIONER", label: "Bootstrap spec" };
+const actor = { subjectId: "local:commissioner", type: "COMMISSIONER", label: "Bootstrap spec", effectiveRole: "COMMISSIONER", context: {} };
 
 describe("season bootstrap", () => {
   const stores: Array<{ close(): Promise<void> }> = [];

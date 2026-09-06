@@ -57,7 +57,7 @@ const command = async (seasonId, commandType) => ({
   commandType,
   idempotencyKey: `fixture-${String(++serial).padStart(3, "0")}-${commandType.toLowerCase()}`,
   ...((await store.getSeason(actor, seasonId))
-    ? { expectedVersion: await store.seasonVersion(seasonId) }
+    ? { expectedVersion: await store.seasonVersion(actor, seasonId) }
     : {}),
 });
 

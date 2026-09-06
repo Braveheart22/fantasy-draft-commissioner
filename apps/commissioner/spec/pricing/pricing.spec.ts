@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { CatalogPreparationService } from "../../src/application/catalog/catalog-preparation-service.js";
 import { PricingService } from "../../src/application/pricing/pricing-service.js";
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
-const actor={type:"LOCAL_COMMISSIONER",label:"Commissioner"} as const;
+const actor={subjectId:"local:commissioner",type:"LOCAL_COMMISSIONER",label:"Commissioner",effectiveRole:"COMMISSIONER",context:{}} as const;
 const meta=(key:string,type:string,version:number)=>({actor,seasonId:"s",idempotencyKey:key,commandType:type,expectedVersion:version});
 async function fixture(){const store=await openSeasonStore(join(await mkdtemp(join(tmpdir(),"commissioner-pricing-")),"draft.db"));await store.execute({actor,seasonId:"s",idempotencyKey:"create",commandType:"CREATE_SEASON"},tx=>tx.createSeason({id:"s",leagueId:"l",year:2026,name:"Season",teamCount:1}));const catalog=await new CatalogPreparationService(store).stage(meta("catalog","STAGE_CATALOG",0),{bytes:Buffer.from(JSON.stringify([{externalId:"jj",name:"Justin Jefferson",position:"WR",nflTeam:"MIN"}])),format:"json",sourceNamespace:"sleeper"});await store.approveCatalog(meta("catalog-ok","APPROVE_CATALOG",1),catalog.id);await store.addCustomPlayer(meta("custom","ADD_CUSTOM_PLAYER",2),{id:"eddie",name:"Eddie Gallagher",position:"K",sourceType:"LEAGUE_CUSTOM"});return store;}
 

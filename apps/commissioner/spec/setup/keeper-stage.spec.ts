@@ -9,7 +9,7 @@ import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js
 import { registerErrorEnvelope } from "../../src/routes/error-envelope.js";
 import { registerSetupRoutes } from "../../src/routes/setup/setup-routes.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 const meta = (key: string, version?: number) => ({ actor, seasonId: "s", idempotencyKey: key, commandType: key, ...(version === undefined ? {} : { expectedVersion: version }) });
 
 async function fixture(teamCount = 2) {

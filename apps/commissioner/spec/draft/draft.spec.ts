@@ -7,10 +7,11 @@ import type { PrismaClient } from "../../src/generated/prisma/client.js";
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { LifecycleState, type CommandMetadata } from "../../src/application/ports/season-repository.js";
 import { canAddPlayerThroughPhase1 } from "../../src/integrations/roster-validator-adapter.js";
+import { SqliteCorrectionAdapter } from "../../src/infrastructure/operations/sqlite-correction-adapter.js";
 import { CorrectionService } from "../../src/application/corrections/correction-service.js";
 import { BootstrapService } from "../../src/application/bootstrap/bootstrap-service.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" };
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} };
 const rules = { limits: { QB: 2, RB: 2, WR: 3, TE: 2, K: 2, DST: 2 }, flexEligible: ["RB", "WR", "TE"], flexCapacity: 1 };
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
@@ -42,9 +43,12 @@ describe("permanent draft order", () => {
       finally { db.close(); }
     };
     const originalRows = readHistory();
-    const corrections = new CorrectionService(path, join(dir, "backups"));
-    const preview = await corrections.preview(seasonId, "DRAFT_ORDER");
-    corrections.confirm(preview.id, { seasonId: preview.seasonId, expectedVersion: preview.seasonVersion, cutHash: preview.cutHash, backupHash: preview.backupHash, confirmation: "CONFIRM ROLLBACK", reason: "Replace incorrect external precedence" });
+    const versionDatabase = new Database(path, { readonly: true });
+    const version = versionDatabase.prepare("SELECT rowVersion FROM Season WHERE id=?").get(seasonId) as { rowVersion: number };
+    versionDatabase.close();
+    const corrections = new CorrectionService(new SqliteCorrectionAdapter(path, join(dir, "backups")));
+    const preview = await corrections.preview({ ...command(seasonId, "PREVIEW_CORRECTION"), expectedVersion: version.rowVersion }, "DRAFT_ORDER");
+    await corrections.confirm({ ...command(seasonId, "CONFIRM_CORRECTION"), expectedVersion: preview.seasonVersion }, preview.id, { cutHash: preview.cutHash, backupHash: preview.backupHash, confirmation: "CONFIRM ROLLBACK", reason: "Replace incorrect external precedence" });
     const historicalRows = readHistory();
     for (const [table, rows] of Object.entries(historicalRows)) {
       expect(rows).toHaveLength(originalRows[table]!.length);
@@ -108,9 +112,9 @@ describe("fixed-order conventional drafting", () => {
   it("rehydrates pick three's clock and roster after correcting a five-pick draft",async()=>{
     const {store,seasonId}=await seeded([120,110]); const order=await store.calculate(command(seasonId,"REWIND-ORDER"));
     for(let index=0;index<5;index++)await store.makePick(command(seasonId,`REWIND-${index}`),{seasonTeamId:order.order[index%2]!.seasonTeamId,playerId:`p-${index}`,rosterRules:rules});
-    await store.close(); const dir=dirs[dirs.length-1]!; const path=join(dir,"db.sqlite"); const db=new Database(path); const pick=db.prepare("SELECT id FROM DraftPick WHERE overallPick=3 AND active=1").get() as {id:string}; db.close();
-    const corrections=new CorrectionService(path,join(dir,"backups")); const preview=await corrections.preview(seasonId,"PICK",pick.id);
-    corrections.confirm(preview.id,{seasonId:preview.seasonId,expectedVersion:preview.seasonVersion,cutHash:preview.cutHash,backupHash:preview.backupHash,confirmation:"CONFIRM ROLLBACK",reason:"Wrong player at pick three"});
+    await store.close(); const dir=dirs[dirs.length-1]!; const path=join(dir,"db.sqlite"); const db=new Database(path); const pick=db.prepare("SELECT id FROM DraftPick WHERE overallPick=3 AND active=1").get() as {id:string}; const version=db.prepare("SELECT rowVersion FROM Season WHERE id=?").get(seasonId) as {rowVersion:number}; db.close();
+    const corrections=new CorrectionService(new SqliteCorrectionAdapter(path,join(dir,"backups"))); const preview=await corrections.preview({...command(seasonId,"PREVIEW_CORRECTION"),expectedVersion:version.rowVersion},"PICK",pick.id);
+    await corrections.confirm({...command(seasonId,"CONFIRM_CORRECTION"),expectedVersion:preview.seasonVersion},preview.id,{cutHash:preview.cutHash,backupHash:preview.backupHash,confirmation:"CONFIRM ROLLBACK",reason:"Wrong player at pick three"});
     const resumed=await openSeasonStore(path); const bootstrap=await new BootstrapService(resumed).load(actor,seasonId);
     expect(bootstrap.legalStage).toBe("DRAFT"); expect(bootstrap.phases.draft?.nextOverallPick).toBe(3); expect(bootstrap.phases.draft?.currentSeasonTeamId).toBe(order.order[0]!.seasonTeamId);
     expect(bootstrap.phases.draft?.history.map(item=>item.overallPick)).toEqual([2,1]); expect(bootstrap.phases.draft?.teams.flatMap(team=>team.roster).map(player=>player.playerId).sort()).toEqual(["p-0","p-1"]);

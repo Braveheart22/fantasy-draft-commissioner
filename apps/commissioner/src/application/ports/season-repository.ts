@@ -1,3 +1,8 @@
+import type { ActorDescriptor } from "./actor.js";
+import type { TransactionPort } from "./transaction.js";
+
+export type { ActorContext, ActorDescriptor } from "./actor.js";
+
 export enum LifecycleState {
   SETUP = "SETUP",
   KEEPERS_LOCKED = "KEEPERS_LOCKED",
@@ -15,7 +20,6 @@ export enum LifecycleState {
   COMPLETED = "COMPLETED",
 }
 
-export interface ActorDescriptor { readonly type: string; readonly label: string }
 export interface CommandMetadata {
   readonly actor: ActorDescriptor;
   readonly seasonId: string;
@@ -36,8 +40,7 @@ export interface SeasonTransaction {
   addCheckpoint(input: Omit<CheckpointRecord, "sourceAuditEventId">): Promise<CheckpointRecord>;
 }
 
-export interface SeasonRepository {
-  execute<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T>;
+export interface SeasonRepository extends TransactionPort<CommandMetadata, SeasonTransaction> {
   hasExecutedCommand(actor: ActorDescriptor, seasonId: string, idempotencyKey: string): Promise<boolean>;
   getSeason(actor: ActorDescriptor, seasonId: string): Promise<SeasonRecord | undefined>;
   listSeasons(actor: ActorDescriptor): Promise<SeasonRecord[]>;

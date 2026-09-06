@@ -7,7 +7,7 @@ import { CatalogPreparationService } from "../../src/application/catalog/catalog
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { registerCatalogRoutes } from "../../src/routes/catalog/catalog-routes.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 
 describe("catalog preparation HTTP delivery", () => {
   it("requires command metadata and serves the SQLite-backed review after staging", async () => {

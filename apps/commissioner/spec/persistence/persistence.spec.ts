@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { migrateDatabaseCopySafely, openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { LifecycleState } from "../../src/application/ports/season-repository.js";
+import type { CommitNotification } from "../../src/application/ports/commit-notification.js";
+import { seasonTransactionAdapterContract } from "../contracts/season-transaction-contract.js";
 import {
   backupArtifactPath,
   fixturePath,
@@ -18,9 +20,70 @@ async function databasePath(name = "season.db") {
   return join(await mkdtemp(join(tmpdir(), "commissioner-u2-")), name);
 }
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
+
+seasonTransactionAdapterContract("SQLite", async () => openSeasonStore(await databasePath("contract.db")));
 
 describe("SQLite season persistence", () => {
+  it("notifies only after a command commits while preserving historical actor attribution", async () => {
+    const notifications: CommitNotification[] = [];
+    const store = await openSeasonStore(await databasePath(), { committed: notification => { notifications.push(notification); } });
+    const metadata = { actor, seasonId: "notified", idempotencyKey: "create", commandType: "CREATE_SEASON", correlationId: "correlation" };
+
+    const created = await store.execute(metadata, tx => tx.createSeason({ id: "notified", leagueId: "league", year: 2026, name: "Notified", teamCount: 8 }));
+    await store.execute(metadata, () => { throw new Error("duplicate operation must not run"); });
+    await expect(store.execute({ ...metadata, idempotencyKey: "rollback", commandType: "ROLLBACK" }, () => { throw new Error("rollback"); })).rejects.toThrow("rollback");
+
+    expect(notifications).toEqual([{ actor, seasonId: "notified", seasonVersion: created.rowVersion, commandType: "CREATE_SEASON", correlationId: "correlation" }]);
+    expect(await store.auditForSeason(actor, "notified")).toEqual([
+      expect.objectContaining({ actorType: actor.type, actorLabel: actor.label, commandType: "CREATE_SEASON" }),
+    ]);
+    await store.close();
+  });
+
+  it("does not report a durable command as failed when a best-effort commit observer fails", async () => {
+    const store = await openSeasonStore(await databasePath(), { committed: () => { throw new Error("observer unavailable"); } });
+    const created = await store.execute({ actor, seasonId: "durable", idempotencyKey: "create", commandType: "CREATE_SEASON" }, tx =>
+      tx.createSeason({ id: "durable", leagueId: "league", year: 2026, name: "Durable", teamCount: 8 }),
+    );
+
+    expect(created.id).toBe("durable");
+    expect(await store.getSeason(actor, "durable")).toMatchObject({ id: "durable" });
+    expect(await store.auditForSeason(actor, "durable")).toHaveLength(1);
+    await store.close();
+  });
+
+  it("releases the SQLite write queue before awaiting best-effort commit delivery", async () => {
+    let releaseFirstNotification!: () => void;
+    let observeFirstNotification!: () => void;
+    const firstNotification = new Promise<void>(resolve => { observeFirstNotification = resolve; });
+    const heldNotification = new Promise<void>(resolve => { releaseFirstNotification = resolve; });
+    let notificationCount = 0;
+    const store = await openSeasonStore(await databasePath(), {
+      committed: () => {
+        notificationCount += 1;
+        if (notificationCount === 1) {
+          observeFirstNotification();
+          return heldNotification;
+        }
+      },
+    });
+    const first = store.execute({ actor, seasonId: "first", idempotencyKey: "create-first", commandType: "CREATE_SEASON" }, tx =>
+      tx.createSeason({ id: "first", leagueId: "league", year: 2026, name: "First", teamCount: 8 }),
+    );
+    await firstNotification;
+
+    const second = await store.execute({ actor, seasonId: "second", idempotencyKey: "create-second", commandType: "CREATE_SEASON" }, tx =>
+      tx.createSeason({ id: "second", leagueId: "league", year: 2027, name: "Second", teamCount: 8 }),
+    );
+    expect(second.id).toBe("second");
+    expect(notificationCount).toBe(2);
+
+    releaseFirstNotification();
+    await first;
+    await store.close();
+  });
+
   it("starts empty, creates a season atomically with audit, and resumes after restart", async () => {
     const path = await databasePath();
     let store = await openSeasonStore(path);
@@ -124,8 +187,8 @@ describe("SQLite season persistence", () => {
     const store = await openSeasonStore(path);
     expect(await store.getSeason(actor, "season-schema-6-clean")).toMatchObject({ state: LifecycleState.SETUP, rowVersion: 0 });
     expect(await store.getSeason(actor, "season-schema-6-completed")).toMatchObject({ state: LifecycleState.COMPLETED, rowVersion: 47 });
-    await expect(store.assertAvailabilityConsistency("season-schema-6-clean")).resolves.toBeUndefined();
-    await expect(store.assertAvailabilityConsistency("season-schema-6-completed")).resolves.toBeUndefined();
+    await expect(store.assertAvailabilityConsistency(actor,"season-schema-6-clean")).resolves.toBeUndefined();
+    await expect(store.assertAvailabilityConsistency(actor,"season-schema-6-completed")).resolves.toBeUndefined();
     await store.close();
 
     const database = new Database(path, { readonly: true, fileMustExist: true });

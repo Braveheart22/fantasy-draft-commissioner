@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { deriveAvailability } from "../../src/application/catalog/catalog-service.js";
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 
 describe("catalog availability", () => {
   it.each([
@@ -31,7 +31,7 @@ describe("catalog availability", () => {
     expect(await store.catalogPlayers(actor, "s", { search: "eddie gallagher" })).toEqual([
       expect.objectContaining({ id: "eddie", normalizedSearchText: "eddie gallagher", aliases: [], reason: "AVAILABLE", available: true }),
     ]);
-    await expect(store.assertAvailabilityConsistency("s")).resolves.toBeUndefined();
+    await expect(store.assertAvailabilityConsistency(actor,"s")).resolves.toBeUndefined();
     await store.close();
   });
 
@@ -69,7 +69,7 @@ describe("catalog availability", () => {
     await store.close();
     const database = new Database(path); database.prepare("UPDATE Player SET available=0 WHERE id='p'").run(); database.close();
     store = await openSeasonStore(path);
-    await expect(store.assertAvailabilityConsistency("s")).rejects.toThrow(/inconsistent.*p/i);
+    await expect(store.assertAvailabilityConsistency(actor,"s")).rejects.toThrow(/inconsistent.*p/i);
     await store.close();
   });
 });

@@ -7,7 +7,7 @@ import { PricingService } from "../../src/application/pricing/pricing-service.js
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { registerPricingRoutes } from "../../src/routes/pricing/pricing-routes.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 
 describe("pricing HTTP delivery", () => {
   it("requires command metadata, rejects malformed input atomically, and serves approved provenance", async () => {

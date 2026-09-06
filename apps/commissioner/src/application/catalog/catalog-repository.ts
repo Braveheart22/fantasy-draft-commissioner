@@ -33,5 +33,5 @@ export interface PlayerSearchPage { page: number; pageSize: number; total: numbe
 export interface CatalogRepository {
   catalogPlayers(actor: ActorDescriptor, seasonId: string, query?: CatalogQuery): Promise<CatalogPlayer[]>;
   searchCatalogPlayers(actor: ActorDescriptor, seasonId: string, query?: PlayerSearchQuery): Promise<PlayerSearchPage>;
-  assertAvailabilityConsistency(seasonId: string): Promise<void>;
+  assertAvailabilityConsistency(actor: ActorDescriptor, seasonId: string): Promise<void>;
 }

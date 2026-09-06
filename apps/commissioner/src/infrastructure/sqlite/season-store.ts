@@ -14,6 +14,7 @@ import type { AuctionBidDraft, AuctionRepository, AuctionRoundNumber, AuctionRou
 import type { AuctionEngineResult, CommissionerAuctionInput } from "../../application/ports/auction-engine.js";
 import type { ActorDescriptor, CommandMetadata, SeasonRecord, SeasonRepository, SeasonTransaction } from "../../application/ports/season-repository.js";
 import { LifecycleState } from "../../application/ports/season-repository.js";
+import type { CommitNotification, CommitNotificationPort } from "../../application/ports/commit-notification.js";
 import { PLAYER_POSITIONS, type ImportPreview, type ImportRow, type KeeperStagePlayer, type KeeperStageSummary, type PlayerInput, type SetupRepository, type SetupSummary, type TeamInput } from "../../application/setup/setup-repository.js";
 import type { DraftOrderDecision, DraftOrderRepository, DraftOrderSummary } from "../../application/draft-order/draft-order-repository.js";
 import type { ConventionalDraftRepository, DraftPickInput } from "../../application/conventional-draft/conventional-draft-repository.js";
@@ -91,8 +92,11 @@ async function requireSelectablePlayer(database: any, seasonId: string, playerId
 
 export class PrismaSeasonStore implements SeasonRepository, SetupRepository, AuctionRepository, DraftOrderRepository, ConventionalDraftRepository, CatalogRepository, CatalogPreparationRepository, PricingRepository, BootstrapRepository, ResultsRepository, OperationsRepository {
   private queue: Promise<void> = Promise.resolve();
-  constructor(private readonly prisma: PrismaClient) {}
-  async seasonVersion(seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly commitNotifications?: CommitNotificationPort,
+  ) {}
+  async seasonVersion(_actor: ActorDescriptor, seasonId: string): Promise<number> { return (await this.prisma.season.findUniqueOrThrow({ where: { id: seasonId }, select: { rowVersion: true } })).rowVersion; }
 
   async results(_actor: ActorDescriptor, seasonId: string): Promise<ResultsSummary> {
     return this.prisma.$transaction(async database => {
@@ -172,18 +176,28 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   }
 
   execute<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T> {
-    const run = this.queue.then(() => this.executeNow(metadata, operation));
-    this.queue = run.then(() => undefined, () => undefined);
-    return run;
+    const commit = this.queue.then(() => this.executeNow(metadata, operation));
+    this.queue = commit.then(() => undefined, () => undefined);
+    return commit.then(async committed => {
+      if (committed.notification && this.commitNotifications) {
+        try {
+          await this.commitNotifications.committed(committed.notification);
+        } catch {
+          // The command and audit are already durable. Hosted delivery will use its
+          // transaction-owned outbox; a local observer cannot turn a commit into a failure.
+        }
+      }
+      return committed.result;
+    });
   }
 
   async hasExecutedCommand(actor: ActorDescriptor, seasonId: string, idempotencyKey: string) {
     return (await this.prisma.auditEvent.count({ where: { seasonId, actorType: actor.type, idempotencyKey } })) > 0;
   }
 
-  private async executeNow<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<T> {
+  private async executeNow<T>(metadata: CommandMetadata, operation: (transaction: SeasonTransaction) => T | Promise<T>): Promise<{ result: T; notification?: CommitNotification }> {
     const duplicate = await this.prisma.auditEvent.findUnique({ where: { seasonId_actorType_idempotencyKey: { seasonId: metadata.seasonId, actorType: metadata.actor.type, idempotencyKey: metadata.idempotencyKey } }, select: { resultJson: true } });
-    if (duplicate?.resultJson != null) return JSON.parse(duplicate.resultJson) as T;
+    if (duplicate?.resultJson != null) return { result: JSON.parse(duplicate.resultJson) as T };
     const auditId = randomUUID();
     const correlationId = metadata.correlationId ?? randomUUID();
     return this.prisma.$transaction(async database => {
@@ -223,7 +237,16 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
       const after = afterRow ? mapSeason(afterRow) : undefined;
       const latest = await database.auditEvent.aggregate({ where: { seasonId: metadata.seasonId }, _max: { sequence: true } });
       await database.auditEvent.create({ data: { id: auditId, seasonId: metadata.seasonId, sequence: (latest._max.sequence ?? 0) + 1, actorType: metadata.actor.type, actorLabel: metadata.actor.label, commandType: metadata.commandType, correlationId, idempotencyKey: metadata.idempotencyKey, reason: metadata.reason ?? null, beforeJson: before ? JSON.stringify(before) : null, afterJson: after ? JSON.stringify(after) : null, resultJson: JSON.stringify(result) } });
-      return result;
+      return {
+        result,
+        notification: {
+          actor: metadata.actor,
+          seasonId: metadata.seasonId,
+          ...(after ? { seasonVersion: after.rowVersion } : {}),
+          commandType: metadata.commandType,
+          correlationId,
+        },
+      };
     });
   }
 
@@ -903,8 +926,8 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
     return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), items };
   }
 
-  async assertAvailabilityConsistency(seasonId: string): Promise<void> {
-    const rows = await this.catalogPlayers({ type: "SYSTEM", label: "availability-consistency" }, seasonId);
+  async assertAvailabilityConsistency(actor: ActorDescriptor, seasonId: string): Promise<void> {
+    const rows = await this.catalogPlayers(actor, seasonId);
     const contradictions = rows.filter(row => row.available !== (row.reason === "AVAILABLE"));
     const persisted = await this.prisma.player.findMany({ where: { seasonId }, select: { id: true, available: true } });
     const derived = new Map(rows.map(row => [row.id, row.available]));
@@ -1176,7 +1199,7 @@ export class PrismaSeasonStore implements SeasonRepository, SetupRepository, Auc
   async close(): Promise<void> { await this.prisma.$disconnect(); }
 }
 
-export async function openSeasonStore(path: string): Promise<PrismaSeasonStore> {
+export async function openSeasonStore(path: string, commitNotifications?: CommitNotificationPort): Promise<PrismaSeasonStore> {
   if (existsSync(path) && databaseNeedsMigration(path)) await migrateDatabaseCopySafely(path);
   else migrateDatabaseInPlace(path);
   const adapter = new PrismaBetterSqlite3({ url: path }, { timestampFormat: "iso8601" });
@@ -1186,5 +1209,5 @@ export async function openSeasonStore(path: string): Promise<PrismaSeasonStore> 
   await prisma.$queryRawUnsafe("PRAGMA journal_mode = DELETE");
   await prisma.$executeRawUnsafe("PRAGMA synchronous = FULL");
   await prisma.$executeRawUnsafe("PRAGMA busy_timeout = 5000");
-  return new PrismaSeasonStore(prisma);
+  return new PrismaSeasonStore(prisma, commitNotifications);
 }

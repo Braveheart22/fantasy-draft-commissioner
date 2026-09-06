@@ -10,7 +10,7 @@ import { openSeasonStore, type PrismaSeasonStore } from "../../src/infrastructur
 import { registerErrorEnvelope } from "../../src/routes/error-envelope.js";
 import { registerAuctionRoutes } from "../../src/routes/auction/auction-routes.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 const rules = { positionLimits: { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 }, flexEligiblePositions: ["RB", "WR", "TE"], flexCapacity: 1 };
 let serial = 0; const meta = (seasonId: string, commandType: string) => ({ actor, seasonId, commandType, idempotencyKey: `${commandType}-${++serial}` });
 const opened: Array<{ store: PrismaSeasonStore; directory: string }> = [];
@@ -90,9 +90,9 @@ describe("auction orchestration", () => {
     await auction.submit(meta(seasonId, "SAVE_VALID"), 1, alpha.seasonTeamId, [{ playerId: "p1", amount: 10 }]);
     await auction.finalize(meta(seasonId, "FINALIZE_VALID"), 1, alpha.seasonTeamId);
     await expect(auction.submit(meta(seasonId, "EDIT_FINAL"), 1, alpha.seasonTeamId, [{ playerId: "p2", amount: 10 }])).rejects.toThrow(/finalized/i);
-    const finalizedVersion = await store.seasonVersion(seasonId);
+    const finalizedVersion = await store.seasonVersion(actor,seasonId);
     await expect(auction.finalize(meta(seasonId, "FINALIZE_AGAIN"), 1, alpha.seasonTeamId)).rejects.toThrow(/already finalized/i);
-    expect(await store.seasonVersion(seasonId)).toBe(finalizedVersion);
+    expect(await store.seasonVersion(actor,seasonId)).toBe(finalizedVersion);
   });
 
   it("keeps the round route masked while the selected-team route rehydrates and finalizes one private draft", async () => {

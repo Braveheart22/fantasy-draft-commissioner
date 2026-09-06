@@ -1,7 +1,8 @@
 import type { FastifyRequest } from "fastify";
+import { LOCAL_COMMISSIONER_ACTOR } from "../application/ports/actor.js";
 import type { CommandMetadata } from "../application/ports/season-repository.js";
 
-export const localCommissioner = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+export const localCommissioner = LOCAL_COMMISSIONER_ACTOR;
 function badRequest(message: string): never { const error = new Error(message) as Error & { statusCode: number }; error.statusCode = 400; throw error; }
 export function commandMetadata(request: FastifyRequest, seasonId: string, commandType: string, requireVersion = true): CommandMetadata {
   const key = request.headers["idempotency-key"];

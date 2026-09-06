@@ -7,7 +7,7 @@ export interface DraftTeamReadModel { seasonTeamId:string; displayName:string; r
 export interface DraftHistoryItem { overallPick:number; roundNumber:number; orderPosition:number; seasonTeamId:string; displayName:string; playerId:string; playerName:string; position:string }
 export interface DraftOrderSummary { rowVersion?:number; status: "TIE_PAUSED" | "FINAL" | "IN_PROGRESS" | "COMPLETED"; ties: DraftOrderTieGroup[]; order: Array<{ orderPosition: number; seasonTeamId: string; displayName: string; remainingBalance: number }>; nextOverallPick: number; currentSeasonTeamId?: string; currentRound:number; filledRosterSlots:number; totalRosterSlots:number; teams:DraftTeamReadModel[]; history:DraftHistoryItem[] }
 export interface DraftOrderRepository {
-  seasonVersion(seasonId:string):Promise<number>;
+  seasonVersion(actor:ActorDescriptor,seasonId:string):Promise<number>;
   calculate(metadata: CommandMetadata): Promise<DraftOrderSummary>;
   recordDraftOrderTieDecision(metadata: CommandMetadata, decision: DraftOrderDecision): Promise<DraftOrderSummary>;
   finalize(metadata: CommandMetadata): Promise<DraftOrderSummary>;

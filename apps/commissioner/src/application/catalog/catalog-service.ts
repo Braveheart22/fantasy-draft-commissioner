@@ -1,3 +1,4 @@
+import type { ActorDescriptor } from "../ports/actor.js";
 import type { AvailabilityReason, CatalogRepository } from "./catalog-repository.js";
 
 export interface AvailabilityFacts { owned: boolean; leagueSelectable: boolean; providerActive: boolean }
@@ -9,5 +10,5 @@ export function deriveAvailability(facts: AvailabilityFacts): { available: boole
 export class CatalogService {
   constructor(private readonly repository: CatalogRepository) {}
   players(...args: Parameters<CatalogRepository["catalogPlayers"]>) { return this.repository.catalogPlayers(...args); }
-  assertConsistency(seasonId: string) { return this.repository.assertAvailabilityConsistency(seasonId); }
+  assertConsistency(actor: ActorDescriptor, seasonId: string) { return this.repository.assertAvailabilityConsistency(actor, seasonId); }
 }

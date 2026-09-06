@@ -34,6 +34,11 @@ import type { CatalogSource } from "../application/catalog-sources/catalog-sourc
 import { PricingService } from "../application/pricing/pricing-service.js";
 import { registerPricingRoutes } from "../routes/pricing/pricing-routes.js";
 import { registerErrorEnvelope } from "../routes/error-envelope.js";
+import { SqliteCheckpointAdapter } from "../infrastructure/operations/sqlite-checkpoint-adapter.js";
+import { SqliteManualBackupAdapter } from "../infrastructure/operations/sqlite-manual-backup-adapter.js";
+import { SqliteCorrectionAdapter } from "../infrastructure/operations/sqlite-correction-adapter.js";
+import { SqliteRecoveryAdapter } from "../infrastructure/operations/sqlite-recovery-adapter.js";
+import { SqliteExportAdapter } from "../infrastructure/operations/sqlite-export-adapter.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -75,7 +80,7 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   const databasePath = join(dataDirectory, "commissioner.db");
   const store = await openSeasonStore(databasePath);
   const backupDirectory = join(dataDirectory, "backups");
-  const checkpoints = new CheckpointService(databasePath, backupDirectory);
+  const checkpoints = new CheckpointService(new SqliteCheckpointAdapter(databasePath, backupDirectory));
   const setup = new SetupService(store, store, checkpoints);
   const auction = new AuctionService(store, auctionEngineAdapter, checkpoints);
   const order = new DraftOrderService(store, checkpoints);
@@ -88,9 +93,14 @@ export async function startCommissionerServer(options: CommissionerServerOptions
   await registerAuctionRoutes(server, auction);
   await registerDraftRoutes(server, order, draft);
   const backupCoordinator = new BackupCoordinator(databasePath);
-  await registerOperationsRoutes(server, { backup: new ManualBackupService(databasePath, backupDirectory, backupCoordinator), corrections: new CorrectionService(databasePath, backupDirectory), recovery: new RecoveryService(databasePath), queries: new OperationsService(store) });
+  await registerOperationsRoutes(server, {
+    backup: new ManualBackupService(new SqliteManualBackupAdapter(databasePath, backupDirectory, backupCoordinator)),
+    corrections: new CorrectionService(new SqliteCorrectionAdapter(databasePath, backupDirectory)),
+    recovery: new RecoveryService(new SqliteRecoveryAdapter(databasePath)),
+    queries: new OperationsService(store),
+  });
   await registerResultsRoutes(server, new ResultsService(store));
-  await registerExportRoutes(server,new ExportService(databasePath,backupDirectory),join(dataDirectory,"exports"));
+  await registerExportRoutes(server,new ExportService(new SqliteExportAdapter(databasePath,backupDirectory)),join(dataDirectory,"exports"));
   await options.registerProfileRoutes?.(server, { setup });
   await registerBuiltUi(server);
   try {

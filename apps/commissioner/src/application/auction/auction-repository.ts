@@ -20,7 +20,7 @@ export interface AuctionRoundSummary {
 }
 export interface TieDecisionInput { tieKey: string; playerId: string; amount: number; participantTeamIds: string[]; preferredTeamId: string; method: string; note?: string; decidedAt: string }
 export interface AuctionRepository {
-  seasonVersion(seasonId: string): Promise<number>;
+  seasonVersion(actor: ActorDescriptor, seasonId: string): Promise<number>;
   openRound(metadata: CommandMetadata, round: AuctionRoundNumber): Promise<AuctionRoundSummary>;
   saveSubmission(metadata: CommandMetadata, round: AuctionRoundNumber, seasonTeamId: string, bids: AuctionBidDraft[], finalize: boolean, confirmZero: boolean): Promise<void>;
   submission(actor: ActorDescriptor, seasonId: string, round: AuctionRoundNumber, seasonTeamId: string): Promise<AuctionSubmissionDraft>;

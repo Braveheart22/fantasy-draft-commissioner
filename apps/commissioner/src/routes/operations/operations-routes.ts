@@ -5,7 +5,7 @@ import { CORRECTION_TYPES, type CorrectionType } from "../../application/correct
 import type { RecoveryService } from "../../application/recovery/recovery-service.js";
 import type { OperationsService } from "../../application/operations/operations-service.js";
 import type { OperationsQuery } from "../../application/operations/operations-repository.js";
-import { commandMetadata } from "../command-metadata.js";
+import { commandMetadata, localCommissioner } from "../command-metadata.js";
 
 type RawOperationsQuery = Partial<Record<keyof OperationsQuery, string>>;
 const stages = new Set(["SETUP", "KEEPERS", "AUCTION_1", "AUCTION_2", "DRAFT", "OPERATIONS"]);
@@ -21,13 +21,13 @@ export function parseOperationsQuery(raw: RawOperationsQuery): OperationsQuery {
 }
 
 export async function registerOperationsRoutes(server: FastifyInstance, services: { backup: ManualBackupService; corrections: CorrectionService; recovery: RecoveryService; queries: OperationsService }) {
-  server.get("/api/operations/recovery", () => services.recovery.summary());
-  server.get<{ Params: { seasonId: string }; Querystring: RawOperationsQuery }>("/api/operations/:seasonId", request => services.queries.read({ type: "LOCAL_COMMISSIONER", label: "Commissioner" }, request.params.seasonId, parseOperationsQuery(request.query)));
+  server.get("/api/operations/recovery", () => services.recovery.summary(localCommissioner));
+  server.get<{ Params: { seasonId: string }; Querystring: RawOperationsQuery }>("/api/operations/:seasonId", request => services.queries.read(localCommissioner, request.params.seasonId, parseOperationsQuery(request.query)));
   server.post<{ Body: { seasonId: string; destinationDirectory?: string; trigger?: string } }>("/api/operations/backups", async request => {
     const metadata = commandMetadata(request, request.body.seasonId, "CREATE_MANUAL_BACKUP");
     return services.backup.create(metadata, request.body.destinationDirectory, request.body.trigger);
   });
-  server.post<{ Body: { manifestPath: string } }>("/api/operations/backups/verify", request => services.backup.verify(request.body.manifestPath));
-  server.post<{ Params: { seasonId: string }; Body: { correctionType: CorrectionType; targetId?: string } }>("/api/operations/:seasonId/corrections/preview", request => { if (!CORRECTION_TYPES.includes(request.body.correctionType)) rejected("Unsupported correction type"); const metadata = commandMetadata(request, request.params.seasonId, "PREVIEW_CORRECTION"); return services.corrections.preview(request.params.seasonId, request.body.correctionType, request.body.targetId, metadata); });
-  server.post<{ Params: { previewId: string }; Body: { seasonId: string; expectedVersion: number; cutHash: string; backupHash: string; confirmation: string; reason: string } }>("/api/operations/corrections/:previewId/confirm", request => { const metadata = commandMetadata(request, request.body.seasonId, "CONFIRM_CORRECTION"); if (metadata.expectedVersion !== request.body.expectedVersion) throw new Error("Expected version header and body must match"); return services.corrections.confirm(request.params.previewId, { ...request.body, actorLabel: metadata.actor.label, idempotencyKey: metadata.idempotencyKey }); });
+  server.post<{ Body: { manifestPath: string } }>("/api/operations/backups/verify", request => services.backup.verify(localCommissioner, request.body.manifestPath));
+  server.post<{ Params: { seasonId: string }; Body: { correctionType: CorrectionType; targetId?: string } }>("/api/operations/:seasonId/corrections/preview", request => { if (!CORRECTION_TYPES.includes(request.body.correctionType)) rejected("Unsupported correction type"); const metadata = commandMetadata(request, request.params.seasonId, "PREVIEW_CORRECTION"); return services.corrections.preview(metadata, request.body.correctionType, request.body.targetId); });
+  server.post<{ Params: { previewId: string }; Body: { seasonId: string; expectedVersion: number; cutHash: string; backupHash: string; confirmation: string; reason: string } }>("/api/operations/corrections/:previewId/confirm", request => { const metadata = commandMetadata(request, request.body.seasonId, "CONFIRM_CORRECTION"); if (metadata.expectedVersion !== request.body.expectedVersion) throw new Error("Expected version header and body must match"); const { seasonId: _seasonId, expectedVersion: _expectedVersion, ...input } = request.body; return services.corrections.confirm(metadata, request.params.previewId, input); });
 }

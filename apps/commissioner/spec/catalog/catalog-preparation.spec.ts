@@ -7,7 +7,7 @@ import { CatalogPreparationService } from "../../src/application/catalog/catalog
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 import { LocalCatalogFileSource } from "../../src/infrastructure/files/local-catalog-file-source.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 const meta = (seasonId: string, key: string, commandType: string, expectedVersion?: number) => ({ actor, seasonId, idempotencyKey: key, commandType, ...(expectedVersion === undefined ? {} : { expectedVersion }) });
 async function fresh() { const path = join(await mkdtemp(join(tmpdir(), "commissioner-catalog-preparation-")), "draft.db"); return { path, store: await openSeasonStore(path) }; }
 

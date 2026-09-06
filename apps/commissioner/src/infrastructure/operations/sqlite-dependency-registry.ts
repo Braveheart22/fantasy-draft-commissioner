@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { CorrectionType, DependencyItem } from "./correction-types.js";
+import type { CorrectionType, DependencyItem } from "../../application/corrections/correction-types.js";
 
 type DependencyRow = { id: string; orderValue?: number; label?: string };
 const rows = (db: Database.Database, sql: string, values: unknown[] = []) => db.prepare(sql).all(...values) as DependencyRow[];
@@ -69,3 +69,5 @@ export function dependencyCut(db: Database.Database, seasonId: string, type: Cor
 }
 
 export const resumeState = (type: CorrectionType) => PREPARATION_TYPES.includes(type) || type === "KEEPER" ? "SETUP" : type === "ROUND_1" ? "KEEPERS_LOCKED" : type === "ROUND_2" ? "R1_PUBLISHED" : type === "DRAFT_ORDER" ? "R2_PUBLISHED" : type === "AUCTION_REOPEN" ? "R1_BIDDING" : "CONVENTIONAL_DRAFT";
+
+

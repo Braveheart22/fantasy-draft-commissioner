@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { BackupReceipt } from "./backup-manifest.js";
+import type { BackupReceipt } from "../../application/backups/backup-manifest.js";
 
 export interface BackupRecordContext {
   seasonId: string;
@@ -30,3 +30,4 @@ export function recordVerifiedBackup(
       context.dependencyCutHash,
     );
 }
+

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openSeasonStore } from "../../src/infrastructure/sqlite/season-store.js";
 
-const actor = { type: "LOCAL_COMMISSIONER", label: "Commissioner" } as const;
+const actor = { subjectId: "local:commissioner", type: "LOCAL_COMMISSIONER", label: "Commissioner", effectiveRole: "COMMISSIONER", context: {} } as const;
 const meta = (seasonId: string, idempotencyKey: string, commandType: string, expectedVersion?: number) => ({ actor, seasonId, idempotencyKey, commandType, ...(expectedVersion === undefined ? {} : { expectedVersion }) });
 async function fresh() { return openSeasonStore(join(await mkdtemp(join(tmpdir(), "commissioner-u3-")), "draft.db")); }
 

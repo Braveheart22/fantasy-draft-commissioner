@@ -3,7 +3,7 @@ import type { SetupService } from "../setup/setup-service.js";
 import type { CommandMetadata } from "../ports/season-repository.js";
 
 export type DemoPreset = "EMPTY" | "SETUP" | "PREPARED" | "AUCTION_READY";
-const actor = { type: "SYSTEM", label: "Deterministic demo profile" } as const;
+const actor = { subjectId: "system:demo-profile", type: "SYSTEM", label: "Deterministic demo profile", effectiveRole: "SYSTEM", context: {} } as const;
 
 export class DemoService {
   constructor(private readonly setup: SetupService) {}
