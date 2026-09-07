@@ -1,0 +1,549 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/postgres"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model SchemaMetadata {
+  singleton Int @id @default(1)
+  version Int
+  applicationVersion String
+}
+model League {
+  id String @id
+  name String
+  seasons Season[]
+  teams Team[]
+}
+model Season {
+  id String @id
+  leagueId String
+  league League @relation(fields: [leagueId], references: [id])
+  year Int
+  name String
+  state String
+  teamCount Int
+  rowVersion Int @default(0)
+  active Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  seasonTeams SeasonTeam[]
+  auditEvents AuditEvent[]
+  snapshots FrozenSnapshot[]
+  checkpoints Checkpoint[]
+  players Player[]
+  importBatches PlayerImportBatch[]
+  catalogSnapshots CatalogSnapshot[]
+  catalogPreparationBatches CatalogPreparationBatch[]
+  pricePreparationBatches PricePreparationBatch[]
+  priceAssignments PlayerPriceAssignment[]
+  playerAliases PlayerSourceAlias[]
+  priceFloors PositionPriceFloor[]
+  keepers KeeperSelection[]
+  auctionRounds AuctionRound[]
+  conventionalDraft ConventionalDraft?
+  correctionActions CorrectionAction[]
+  exports ExportRecord[]
+  commandReceipts CommandReceipt[]
+  outboxEvents OutboxEvent[]
+  @@unique([leagueId, year])
+}
+model ExportRecord {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  backupId String
+  jsonPath String
+  jsonSha256 String
+  csvPath String
+  csvSha256 String
+  schemaVersion Int
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  @@index([seasonId, createdAt])
+}
+model Team {
+  id String @id
+  leagueId String
+  league League @relation(fields: [leagueId], references: [id])
+  franchiseName String
+  seasons SeasonTeam[]
+}
+model SeasonTeam {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  teamId String
+  team Team @relation(fields: [teamId], references: [id])
+  displayName String
+  seedOrder Int
+  active Boolean @default(true)
+  @@unique([seasonId, teamId])
+  @@unique([seasonId, seedOrder])
+  keeper KeeperSelection?
+  draftOrderEntries DraftOrderEntry[]
+  draftPicks DraftPick[]
+}
+model ConventionalDraft {
+  id String @id
+  seasonId String @unique
+  season Season @relation(fields: [seasonId], references: [id])
+  status String
+  orderSnapshotId String?
+  orderHash String?
+  contractVersion String
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  orderEntries DraftOrderEntry[]
+  tieDecisions DraftOrderTieDecision[]
+  picks DraftPick[]
+}
+model DraftOrderEntry {
+  id String @id
+  conventionalDraftId String
+  conventionalDraft ConventionalDraft @relation(fields: [conventionalDraftId], references: [id])
+  orderPosition Int
+  seasonTeamId String
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+  remainingBalance Int
+  supersededAt DateTime?
+  // Partial unique indexes for active position/team are maintained by migration 10.
+}
+model DraftOrderTieDecision {
+  id String @id
+  conventionalDraftId String
+  conventionalDraft ConventionalDraft @relation(fields: [conventionalDraftId], references: [id])
+  balance Int
+  participantTeamIdsJson String
+  precedenceTeamIdsJson String
+  method String
+  note String?
+  decidedAt DateTime
+  supersededAt DateTime?
+  // Partial unique index for non-superseded balance is maintained by migration 10.
+}
+model DraftPick {
+  id String @id
+  conventionalDraftId String
+  conventionalDraft ConventionalDraft @relation(fields: [conventionalDraftId], references: [id])
+  overallPick Int
+  roundNumber Int
+  orderPosition Int
+  seasonTeamId String
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+  playerId String
+  active Boolean @default(true)
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  // Partial unique indexes for active overallPick/playerId are maintained by migration 10.
+}
+model Player {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  name String
+  position String
+  sourceType String
+  sourceNamespace String?
+  externalId String?
+  nflTeam String?
+  providerStatus String @default("ACTIVE")
+  providerActive Boolean @default(true)
+  leagueSelectable Boolean @default(true)
+  normalizedSearchText String @default("")
+  sourceUpdatedAt DateTime?
+  catalogSnapshotId String?
+  supersedesPlayerId String?
+  supersededAt DateTime?
+  custom Boolean @default(false)
+  explicitMinimumBid Int?
+  available Boolean @default(true)
+  keeperEligible Boolean @default(false)
+  activeImportBatchId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  keeper KeeperSelection?
+  aliases PlayerSourceAlias[]
+  priceAssignments PlayerPriceAssignment[]
+  catalogSnapshot CatalogSnapshot? @relation(fields: [catalogSnapshotId], references: [id])
+  @@unique([seasonId, sourceType, sourceNamespace, externalId])
+  @@index([seasonId, normalizedSearchText])
+  @@index([seasonId, nflTeam, position])
+  @@index([seasonId, providerActive, leagueSelectable])
+}
+model PlayerSourceAlias {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  playerId String
+  player Player @relation(fields: [playerId], references: [id])
+  sourceNamespace String
+  sourceId String
+  createdAt DateTime @default(now())
+  @@unique([seasonId, sourceNamespace, sourceId])
+  @@unique([playerId, sourceNamespace])
+  @@index([playerId])
+}
+model CatalogSnapshot {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceNamespace String
+  state String
+  sourceHash String
+  normalizedHash String
+  sourceUpdatedAt DateTime?
+  approvedAt DateTime?
+  supersedesId String?
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  players Player[]
+  @@unique([seasonId, sourceNamespace, sourceHash])
+  @@index([seasonId, sourceNamespace, state, supersededAt])
+}
+model CatalogPreparationBatch {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceNamespace String
+  format String
+  sourceHash String
+  normalizedHash String
+  expectedSeasonVersion Int
+  state String
+  rowCount Int
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+  approvedAt DateTime?
+  rows CatalogPreparationRow[]
+  @@unique([seasonId, sourceNamespace, sourceHash])
+  @@index([seasonId, state, createdAt])
+}
+model CatalogPreparationRow {
+  id String @id
+  batchId String
+  batch CatalogPreparationBatch @relation(fields: [batchId], references: [id])
+  rowNumber Int
+  operation String @default("UPSERT")
+  externalId String
+  name String
+  position String
+  nflTeam String?
+  providerStatus String
+  providerActive Boolean
+  leagueSelectable Boolean
+  sourceUpdatedAt DateTime?
+  aliasesJson String
+  reviewKind String?
+  reviewMessage String?
+  disposition String?
+  resolutionPlayerId String?
+  @@unique([batchId, rowNumber])
+  @@index([batchId, reviewKind, disposition])
+}
+model PlayerImportBatch {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceNamespace String
+  format String
+  sha256 String
+  rowCount Int
+  supersedesId String?
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([seasonId, sourceNamespace, sha256])
+}
+model PositionPriceFloor {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  position String
+  minimumBid Int
+  supersededAt DateTime?
+  // Partial unique index for active season/position is maintained by migration 11.
+}
+model PricePreparationBatch {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sourceLabel String
+  format String
+  sourceHash String
+  normalizedHash String
+  expectedSeasonVersion Int
+  state String
+  rowCount Int
+  createdAt DateTime @default(now())
+  approvedAt DateTime?
+  supersededAt DateTime?
+  rows PricePreparationRow[]
+  assignments PlayerPriceAssignment[]
+  @@unique([seasonId, sourceHash])
+  @@index([seasonId, state, createdAt])
+}
+model PricePreparationRow {
+  id String @id
+  batchId String
+  batch PricePreparationBatch @relation(fields: [batchId], references: [id])
+  rowNumber Int
+  sourceNamespace String?
+  sourceId String?
+  name String
+  nflTeam String?
+  position String
+  minimumBid Int
+  matchKind String
+  matchedPlayerId String?
+  reviewMessage String?
+  disposition String?
+  resolutionPlayerId String?
+  @@unique([batchId, rowNumber])
+  @@index([batchId, matchKind, disposition])
+}
+model PlayerPriceAssignment {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  playerId String
+  player Player @relation(fields: [playerId], references: [id])
+  minimumBid Int
+  sourceType String
+  sourceLabel String
+  sourceBatchId String?
+  sourceBatch PricePreparationBatch? @relation(fields: [sourceBatchId], references: [id])
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  @@index([seasonId, playerId, active, sourceType])
+  @@index([sourceBatchId])
+}
+model KeeperSelection {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  seasonTeamId String @unique
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+  playerId String @unique
+  player Player @relation(fields: [playerId], references: [id])
+  cost Int @default(50)
+  startingBudget Int
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+}
+model AuctionRound {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  roundNumber Int
+  status String
+  inputSnapshotId String?
+  inputHash String?
+  contractVersion String?
+  publishedAt DateTime?
+  supersededAt DateTime?
+  submissions AuctionSubmission[]
+  attempts AuctionAttempt[]
+  decisions AuctionTieDecision[]
+  awards AuctionAward[]
+  @@unique([seasonId, roundNumber, supersededAt])
+}
+model AuctionSubmission {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  seasonTeamId String
+  status String
+  zeroConfirmed Boolean @default(false)
+  bidsJson String
+  bidCount Int
+  submissionVersion Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@unique([roundId, seasonTeamId])
+}
+model AuctionAttempt {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  attemptNumber Int
+  inputJson String
+  inputHash String
+  outputJson String
+  outputHash String
+  eliminationsJson String
+  traceJson String
+  status String
+  contractVersion String
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+  @@unique([roundId, attemptNumber])
+}
+model AuctionTieDecision {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  tieKey String
+  playerId String
+  amount Int
+  participantTeamIdsJson String
+  preferredTeamId String
+  method String
+  note String?
+  decidedAt DateTime
+  supersededAt DateTime?
+}
+model AuctionAward {
+  id String @id
+  roundId String
+  round AuctionRound @relation(fields: [roundId], references: [id])
+  seasonTeamId String
+  playerId String
+  amount Int
+  bidId String
+  sourceAttemptId String
+  supersededAt DateTime?
+  @@unique([roundId, playerId])
+}
+model TeamAuctionBalance {
+  id String @id
+  seasonId String
+  seasonTeamId String
+  roundNumber Int
+  startingBudget Int
+  spent Int
+  remainingBudget Int
+  supersededAt DateTime?
+  @@unique([seasonId, seasonTeamId, roundNumber])
+}
+model RosterAssignment {
+  id String @id
+  seasonId String
+  seasonTeamId String
+  playerId String
+  acquisitionSource String
+  auctionRound Int?
+  cost Int?
+  sourceEntityId String
+  supersededAt DateTime?
+  @@unique([seasonId, playerId, supersededAt])
+}
+model AuditEvent {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  sequence Int
+  actorType String
+  actorLabel String
+  actorSubjectId String
+  actorRole String
+  commandType String
+  entityType String?
+  entityId String?
+  correlationId String
+  idempotencyKey String
+  reason String?
+  beforeJson String?
+  afterJson String?
+  resultJson String?
+  createdAt DateTime @default(now())
+  snapshots FrozenSnapshot[]
+  checkpoints Checkpoint[]
+  commandReceipt CommandReceipt?
+  @@unique([seasonId, sequence])
+  @@index([seasonId, actorSubjectId, idempotencyKey])
+}
+
+model CommandReceipt {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  actorSubjectId String
+  idempotencyKey String
+  commandType String
+  commandFingerprint String
+  resultJson String
+  auditEventId String @unique
+  auditEvent AuditEvent @relation(fields: [auditEventId], references: [id])
+  seasonRevision Int
+  createdAt DateTime @default(now())
+  @@unique([seasonId, actorSubjectId, idempotencyKey])
+}
+
+model OutboxEvent {
+  cursor BigInt @id @default(autoincrement())
+  id String @unique
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  seasonRevision Int
+  projectionKind String
+  commandType String
+  correlationId String
+  createdAt DateTime @default(now())
+  @@index([seasonId, cursor])
+  @@index([createdAt])
+}
+model FrozenSnapshot {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  kind String
+  schemaVersion Int
+  payloadJson String
+  sha256 String
+  createdAt DateTime @default(now())
+  sourceAuditEventId String
+  sourceAuditEvent AuditEvent @relation(fields: [sourceAuditEventId], references: [id])
+  checkpoints Checkpoint[]
+}
+model Checkpoint {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  kind String
+  seasonVersion Int
+  stateSnapshotId String
+  stateSnapshot FrozenSnapshot @relation(fields: [stateSnapshotId], references: [id])
+  sourceAuditEventId String
+  sourceAuditEvent AuditEvent @relation(fields: [sourceAuditEventId], references: [id])
+  createdAt DateTime @default(now())
+  supersededAt DateTime?
+}
+
+model BackupRecord {
+  id String @id
+  seasonId String?
+  path String
+  manifestPath String
+  sha256 String
+  schemaVersion Int
+  applicationVersion String
+  trigger String
+  seasonVersion Int?
+  dependencyCutHash String?
+  verifiedAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model CorrectionAction {
+  id String @id
+  seasonId String
+  season Season @relation(fields: [seasonId], references: [id])
+  correctionType String
+  targetId String?
+  requestedAuditEventId String?
+  rollbackCheckpointId String?
+  seasonVersion Int
+  dependencyCutHash String
+  impactJson String
+  backupHash String?
+  reason String?
+  confirmedAt DateTime?
+  resultAuditEventId String?
+  supersededAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([seasonId, createdAt])
+}

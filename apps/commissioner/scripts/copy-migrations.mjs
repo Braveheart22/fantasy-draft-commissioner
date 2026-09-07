@@ -8,5 +8,11 @@ await cp(
   new URL("../dist/prisma/migrations/", import.meta.url),
   { recursive: true },
 );
+await mkdir(new URL("../dist/prisma/postgres/migrations/", import.meta.url), { recursive: true });
+await cp(
+  new URL("../prisma/postgres/migrations/", import.meta.url),
+  new URL("../dist/prisma/postgres/migrations/", import.meta.url),
+  { recursive: true },
+);
 await mkdir(new URL("../dist/src/ui/demo/", import.meta.url), { recursive: true });
 await cp(new URL("../src/ui/demo/index.html", import.meta.url), new URL("../dist/src/ui/demo/index.html", import.meta.url));

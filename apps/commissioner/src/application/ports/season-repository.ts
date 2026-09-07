@@ -25,7 +25,11 @@ export interface CommandMetadata {
   readonly seasonId: string;
   readonly idempotencyKey: string;
   readonly commandType: string;
+  /** Stable hash/input identity used by hosted idempotency replay validation. */
+  readonly commandFingerprint?: string;
   readonly expectedVersion?: number;
+  /** Submission-local optimistic version; hosted bid writes must not use seasonVersion as their edit guard. */
+  readonly expectedSubmissionVersion?: number;
   readonly correlationId?: string;
   readonly reason?: string;
 }

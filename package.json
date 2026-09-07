@@ -18,6 +18,7 @@
     "commissioner:build": "npm run build --workspace @league-draft/commissioner",
     "commissioner:start": "npm run start --workspace @league-draft/commissioner",
     "commissioner:restore": "npm run restore --workspace @league-draft/commissioner --",
+    "commissioner:postgres:migrate": "npm run postgres:migrate --workspace @league-draft/commissioner",
     "commissioner:package": "npm run package:local --workspace @league-draft/commissioner --"
   },
   "devDependencies": {

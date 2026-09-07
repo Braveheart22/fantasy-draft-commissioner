@@ -6,6 +6,7 @@ export type AuctionSubmissionStatus = "DRAFT" | "FINAL";
 export interface AuctionBidDraft { playerId: string; amount: number }
 export interface AuctionSubmissionDraft {
   seasonTeamId: string;
+  submissionVersion?: number;
   status: AuctionSubmissionStatus;
   bidCount: number;
   zeroConfirmed: boolean;

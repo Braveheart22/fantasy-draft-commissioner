@@ -15,7 +15,7 @@ export function seasonTransactionAdapterContract(name: string, open: () => Promi
       const adapter = await open();
       const seasonId = randomUUID();
       const actor = { subjectId: "contract:commissioner", type: "LOCAL_COMMISSIONER", label: "Contract Commissioner", effectiveRole: "COMMISSIONER", context: { seasonId } } as const;
-      const metadata = { actor, seasonId, commandType: "CREATE_SEASON", idempotencyKey: randomUUID(), correlationId: randomUUID() };
+      const metadata = { actor, seasonId, commandType: "CREATE_SEASON", commandFingerprint: `CREATE_SEASON:${seasonId}`, idempotencyKey: randomUUID(), correlationId: randomUUID() };
       let executions = 0;
       try {
         const create = () => adapter.execute(metadata, transaction => {
@@ -40,7 +40,7 @@ export function seasonTransactionAdapterContract(name: string, open: () => Promi
       const adapter = await open();
       const seasonId = randomUUID();
       const actor = { subjectId: "contract:commissioner", type: "LOCAL_COMMISSIONER", label: "Contract Commissioner", effectiveRole: "COMMISSIONER", context: { seasonId } } as const;
-      const metadata = { actor, seasonId, commandType: "CREATE_SEASON", idempotencyKey: randomUUID() };
+      const metadata = { actor, seasonId, commandType: "CREATE_SEASON", commandFingerprint: `CREATE_SEASON:${seasonId}`, idempotencyKey: randomUUID() };
       try {
         await expect(adapter.execute<SeasonRecord>(metadata, async transaction => {
           await transaction.createSeason({ id: seasonId, leagueId: randomUUID(), year: 2031, name: "Rollback", teamCount: 8 });
